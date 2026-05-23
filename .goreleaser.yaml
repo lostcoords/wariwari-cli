@@ -1,0 +1,47 @@
+version: 2
+
+project_name: wariwari
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: wariwari
+    main: ./cmd/wariwari
+    binary: wariwari
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: default
+    ids: [wariwari]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - MIT-LICENSE
+      - README.md
+      - SECURITY.md
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: github-native
+
+release:
+  prerelease: auto
+  make_latest: "{{ if .Prerelease }}false{{ else }}auto{{ end }}"

@@ -1,0 +1,23 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod tidy
+      - run: git diff --exit-code go.mod go.sum
+      - run: gofmt -l . | tee /tmp/gofmt.txt
+      - run: test ! -s /tmp/gofmt.txt
+      - run: go vet ./...
+      - run: go test ./internal/...
+      - run: go build -o bin/wariwari ./cmd/wariwari

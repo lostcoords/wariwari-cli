@@ -1,0 +1,12 @@
+{
+  "name": "wariwari",
+  "version": "0.1.0",
+  "description": "WariWari integration for Claude Code. Manage groups, participants, categories, transactions, and balances.",
+  "author": {
+    "name": "WariWari",
+    "email": "support@wariwari.jp"
+  },
+  "homepage": "https://github.com/lostcoords/wariwari-cli",
+  "repository": "https://github.com/lostcoords/wariwari-cli",
+  "license": "MIT"
+}
