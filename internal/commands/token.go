@@ -1,67 +1,34 @@
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
 
+	"github.com/spf13/cobra"
+)
+
+// API-key management is deliberately web-only — there is no /v1 route to list,
+// create or revoke a key. This command stays so the old `token list|create|
+// delete` invocations fail with directions instead of "unknown command".
 var tokenCmd = &cobra.Command{
 	Use:   "token",
-	Short: "Manage WariWari API keys",
-}
+	Short: "Explain where WariWari API keys are managed",
+	Long: `WariWari API keys are managed on the web account page, not through the API.
+There is no /v1 endpoint to list, create, or revoke a key.
 
-var tokenName string
-var tokenCursor string
+Create a key at https://wariwari.jp/account (Account -> API keys). It is shown
+once; save it with "wariwari auth login TOKEN".
 
-var tokenListCmd = &cobra.Command{
-	Use:     "list",
-	Aliases: []string{"ls"},
-	Short:   "List API keys",
+Note that a developer key (wari_...) cannot create groups — POST /v1/groups is
+session-credential only and answers 403 ACCESS_DENIED.`,
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		data, err := api.Get(cmd.Context(), "/api_keys", queryWithPaging(tokenCursor))
-		if err != nil {
-			return err
-		}
-		return printOK(data, "API keys")
-	},
-}
-
-var tokenCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create an API key",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		body := map[string]any{"name": tokenName}
-		data, err := api.Post(cmd.Context(), "/api_keys", body, "")
-		if err != nil {
-			return err
-		}
-		return printOK(data, "API key created")
-	},
-}
-
-var tokenDeleteCmd = &cobra.Command{
-	Use:     "delete ID",
-	Aliases: []string{"rm"},
-	Short:   "Revoke an API key",
-	Args:    cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		data, err := api.Delete(cmd.Context(), "/api_keys/"+args[0])
-		if err != nil {
-			return err
-		}
-		return printOK(data, "API key revoked")
+		return fmt.Errorf("API keys are managed on the web account page (https://wariwari.jp/account), not through the API; save one with `wariwari auth login TOKEN`")
 	},
 }
 
 func init() {
+	// Tolerate the flags the removed subcommands took (e.g. `token create
+	// --name X`) so those callers get the explanation, not a flag error.
+	tokenCmd.FParseErrWhitelist = cobra.FParseErrWhitelist{UnknownFlags: true}
 	rootCmd.AddCommand(tokenCmd)
-	tokenCmd.AddCommand(tokenListCmd, tokenCreateCmd, tokenDeleteCmd)
-	tokenListCmd.Flags().StringVar(&tokenCursor, "cursor", "", "Pagination cursor")
-	tokenCreateCmd.Flags().StringVar(&tokenName, "name", "CLI", "API key name")
 }

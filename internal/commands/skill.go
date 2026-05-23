@@ -28,11 +28,18 @@ var skillInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install the WariWari agent skill",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := installSkill()
+		agentsPath, err := installSkill()
 		if err != nil {
 			return err
 		}
-		return printOK(map[string]any{"skill_path": path}, "WariWari skill installed")
+		codexPath, err := installCodexSkill()
+		if err != nil {
+			return err
+		}
+		return printOK(map[string]any{
+			"skill_path": agentsPath,
+			"codex_path": codexPath,
+		}, "WariWari skill installed")
 	},
 }
 
@@ -41,11 +48,18 @@ func installSkill() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return writeEmbeddedSkill(filepath.Join(home, ".agents", "skills", "wariwari"))
+}
+
+func installCodexSkill() (string, error) {
+	return writeEmbeddedSkill(codexSkillDir())
+}
+
+func writeEmbeddedSkill(dir string) (string, error) {
 	data, err := skills.FS.ReadFile("wariwari/SKILL.md")
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".agents", "skills", "wariwari")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -92,10 +106,18 @@ func linkSkillToClaude() (string, error) {
 }
 
 func codexSkillPath() string {
+	return filepath.Join(codexSkillDir(), skillFilename)
+}
+
+func codexSkillDir() string {
 	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
-		return filepath.Join(home, "skills", "wariwari", skillFilename)
+		return filepath.Join(home, "skills", "wariwari")
 	}
-	return "~/.codex/skills/wariwari/SKILL.md"
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".codex", "skills", "wariwari")
+	}
+	return filepath.Join(userHome, ".codex", "skills", "wariwari")
 }
 
 func init() {

@@ -2,11 +2,13 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 
 	"github.com/itchyny/gojq"
+	"github.com/lostcoords/wariwari-cli/internal/client"
 )
 
 type breadcrumb struct {
@@ -30,7 +32,7 @@ func writeJSON(w io.Writer, v any) error {
 }
 
 func printOK(data any, summary string, crumbs ...breadcrumb) error {
-	payload := any(response{OK: true, Data: data, Summary: summary, Breadcrumbs: crumbs})
+	payload := any(response{OK: true, Data: data, Summary: summary, Breadcrumbs: keptCrumbs(crumbs)})
 	if quiet || agent {
 		payload = data
 	}
@@ -62,14 +64,76 @@ func printOK(data any, summary string, crumbs ...breadcrumb) error {
 func printErr(err error) {
 	msg := err.Error()
 	if jsonOutput || quiet || agent {
-		_ = writeJSON(out, response{OK: false, Error: map[string]any{"message": msg}})
+		payload := map[string]any{"message": msg}
+		// API failures are RFC 9457 Problem Details. Pass the whole document
+		// through so a caller can switch on `code` and reconcile against the
+		// `current` record a stale write was rejected against.
+		var apiErr *client.Error
+		if errors.As(err, &apiErr) {
+			payload = apiErr.Problem()
+			payload["message"] = msg
+		}
+		_ = writeJSON(out, response{OK: false, Error: payload})
 		return
 	}
 	fmt.Fprintln(errOut, msg)
+
+	var apiErr *client.Error
+	if errors.As(err, &apiErr) {
+		if fields, ok := apiErr.Body["errors"].(map[string]any); ok {
+			for _, name := range sortedKeys(fields) {
+				fmt.Fprintf(errOut, "  %s: %v\n", name, fields[name])
+			}
+		}
+		if apiErr.Code() == "CONFLICT" {
+			fmt.Fprintln(errOut, "  Re-read the record and retry with the lockVersion from `current`.")
+		}
+	}
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func crumb(action, cmd, description string) breadcrumb {
 	return breadcrumb{Action: action, Cmd: cmd, Description: description}
+}
+
+func keptCrumbs(crumbs []breadcrumb) []breadcrumb {
+	var kept []breadcrumb
+	for _, c := range crumbs {
+		if c.Cmd != "" {
+			kept = append(kept, c)
+		}
+	}
+	return kept
+}
+
+// nextPageCrumb turns pagination.hasMore/pagination.cursor into a runnable
+// follow-up command. It returns a zero breadcrumb on the last page, which
+// printOK drops.
+func nextPageCrumb(data any, cmdPrefix string) breadcrumb {
+	body, ok := data.(map[string]any)
+	if !ok {
+		return breadcrumb{}
+	}
+	pagination, ok := body["pagination"].(map[string]any)
+	if !ok {
+		return breadcrumb{}
+	}
+	if hasMore, _ := pagination["hasMore"].(bool); !hasMore {
+		return breadcrumb{}
+	}
+	cursor, _ := pagination["cursor"].(string)
+	if cursor == "" {
+		return breadcrumb{}
+	}
+	return crumb("next-page", cmdPrefix+" "+cursor, "Fetch the next page")
 }
 
 func printJQ(payload any) error {
@@ -115,6 +179,10 @@ func jsonShape(v any) (any, error) {
 	return out, nil
 }
 
+// collectionKeys are the camelCase array fields the API nests rows under, in
+// the order --count and --ids-only should prefer them.
+var collectionKeys = []string{"groups", "transactions", "participants", "groupCategories", "activity", "suggestedPayments"}
+
 func countData(v any) int {
 	switch data := v.(type) {
 	case []any:
@@ -122,7 +190,7 @@ func countData(v any) int {
 	case []map[string]any:
 		return len(data)
 	case map[string]any:
-		for _, key := range []string{"groups", "participants", "group_categories", "transactions", "activity", "api_keys", "balances", "suggested_payments"} {
+		for _, key := range collectionKeys {
 			if nested, ok := data[key]; ok {
 				return countData(nested)
 			}
@@ -151,7 +219,7 @@ func collectIDs(v any) []string {
 				ids = append(ids, id)
 				return
 			}
-			for _, key := range []string{"groups", "participants", "group_categories", "transactions", "activity", "api_keys", "balances", "suggested_payments"} {
+			for _, key := range collectionKeys {
 				if nested, ok := data[key]; ok {
 					walk(nested)
 				}

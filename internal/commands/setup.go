@@ -36,7 +36,7 @@ var setupCmd = &cobra.Command{
 		}
 
 		if err := huh.NewInput().
-			Title("WariWari URL").
+			Title("WariWari API URL").
 			Value(&apiURL).
 			Run(); err != nil {
 			return nil

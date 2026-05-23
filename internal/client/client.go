@@ -19,19 +19,52 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+// Error carries an RFC 9457 Problem Details response. The API always answers
+// failures with `code`, `title`, `detail` and `status`, plus `errors` on
+// validation failures and `current` (the fresh record) on a 409 CONFLICT.
 type Error struct {
 	StatusCode int
 	Body       map[string]any
 }
 
 func (e *Error) Error() string {
+	code := e.Code()
+	detail := e.Detail()
+
+	switch {
+	case code != "" && detail != "":
+		return fmt.Sprintf("%s: %s (HTTP %d)", code, detail, e.StatusCode)
+	case code != "":
+		return fmt.Sprintf("%s (HTTP %d)", code, e.StatusCode)
+	case detail != "":
+		return fmt.Sprintf("%s (HTTP %d)", detail, e.StatusCode)
+	default:
+		return fmt.Sprintf("request failed with HTTP %d", e.StatusCode)
+	}
+}
+
+// Code is the stable UPPER_SNAKE_CASE identifier to switch on.
+func (e *Error) Code() string {
+	code, _ := e.Body["code"].(string)
+	return code
+}
+
+func (e *Error) Detail() string {
 	if detail, _ := e.Body["detail"].(string); detail != "" {
 		return detail
 	}
-	if title, _ := e.Body["title"].(string); title != "" {
-		return title
+	title, _ := e.Body["title"].(string)
+	return title
+}
+
+// Problem returns the Problem Details document, so callers can render `errors`
+// and the `current` record a stale write was rejected against.
+func (e *Error) Problem() map[string]any {
+	problem := map[string]any{"status": e.StatusCode}
+	for key, value := range e.Body {
+		problem[key] = value
 	}
-	return fmt.Sprintf("request failed with HTTP %d", e.StatusCode)
+	return problem
 }
 
 func New(baseURL, token, version string) *Client {
@@ -51,10 +84,6 @@ func (c *Client) Get(ctx context.Context, path string, query map[string]string) 
 
 func (c *Client) Post(ctx context.Context, path string, body any, idempotencyKey string) (any, error) {
 	return c.Do(ctx, http.MethodPost, path, nil, body, idempotencyKey)
-}
-
-func (c *Client) Put(ctx context.Context, path string, body any) (any, error) {
-	return c.Do(ctx, http.MethodPut, path, nil, body, "")
 }
 
 func (c *Client) Patch(ctx context.Context, path string, body any) (any, error) {
@@ -111,10 +140,9 @@ func (c *Client) Do(ctx context.Context, method, path string, query map[string]s
 	}
 	defer resp.Body.Close()
 
+	// Only `DELETE /v1/groups/:group_token` answers 204; every other delete
+	// returns the refreshed group snapshot.
 	if resp.StatusCode == http.StatusNoContent {
-		if resp.StatusCode >= 400 {
-			return nil, &Error{StatusCode: resp.StatusCode}
-		}
 		return map[string]any{"deleted": true}, nil
 	}
 

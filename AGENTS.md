@@ -17,30 +17,86 @@ wariwari-cli/
 ## API
 
 The CLI talks to WariWari's `/v1` JSON API with `Authorization: Bearer <token>`.
+The authoritative contract is the OpenAPI 3.1 bundle in the server repo
+(`openapi/dist/wariwari.bundled.yaml`) and its prose spec (`docs/specs/api.md`).
+Check a route there before adding or changing one here.
 
-Key routes:
+### Wire format
 
-- `GET /v1/me`
-- `GET /v1/groups`
-- `POST /v1/groups`
-- `GET /v1/groups/:group_token`
-- `PUT /v1/groups/:group_token`
-- `GET /v1/groups/:group_token/snapshot`
-- `GET /v1/groups/:group_token/balances`
-- `GET /v1/groups/:group_token/participants`
-- `PUT /v1/groups/:group_token/participants/:participant_token`
-- `DELETE /v1/groups/:group_token/participants/:participant_token`
-- `GET /v1/groups/:group_token/categories`
-- `PUT /v1/groups/:group_token/categories/:category_token`
-- `DELETE /v1/groups/:group_token/categories/:category_token`
-- `GET /v1/groups/:group_token/transactions`
-- `GET /v1/groups/:group_token/transactions/:transaction_token`
-- `PUT /v1/groups/:group_token/transactions/:transaction_token`
-- `DELETE /v1/groups/:group_token/transactions/:transaction_token`
-- `GET /v1/groups/:group_token/transactions/:transaction_token/activity`
-- `GET /v1/api_keys`
-- `POST /v1/api_keys`
-- `DELETE /v1/api_keys/:id`
+**Every field is camelCase**: `lockVersion`, `amountCents`, `splitType`,
+`paidByToken`, `participantToken`, `emailAddress`, `groupCategoryToken`,
+`{ "pagination": { "hasMore", "cursor" } }`.
+
+Two carve-outs:
+
+- Maps keyed by data pass through untouched — `fxRates`,
+  `spendingByCurrency`, `netByCurrency` (keyed by ISO-4217 code; `netByCurrency`'s
+  inner objects by participant token), and on requests `splitPercentages` /
+  `splitShares` (keyed by participant token).
+- Values are never converted. Enum strings stay snake_case (`read_only`), as do
+  URL path segments (`/fx_rate`) and path parameters (`:group_token`).
+
+### Routes the CLI uses
+
+| Command                     | Route                                                      |
+| --------------------------- | ---------------------------------------------------------- |
+| `me`                        | `GET /v1/me`                                               |
+| `group list`                | `GET /v1/groups` (`archived`, `take`, `cursor`)            |
+| `group create`              | `POST /v1/groups` (+ `Idempotency-Key`)                    |
+| `group show` / `snapshot`   | `GET /v1/groups/:group_token`                              |
+| `group update`              | `PATCH /v1/groups/:group_token`                            |
+| `group activity`            | `GET /v1/groups/:group_token/activity`                     |
+| `balance`                   | `GET /v1/groups/:group_token` (derived)                    |
+| `participant list`          | `GET /v1/groups/:group_token` (derived)                    |
+| `participant create`        | `POST /v1/groups/:group_token/participants`                |
+| `participant update`        | `PATCH /v1/groups/:group_token/participants/:token`        |
+| `participant delete`        | `DELETE /v1/groups/:group_token/participants/:token`       |
+| `category list`             | `GET /v1/groups/:group_token` (derived)                    |
+| `category create`           | `POST /v1/groups/:group_token/categories`                  |
+| `category update`           | `PATCH /v1/groups/:group_token/categories/:token`          |
+| `category delete`           | `DELETE /v1/groups/:group_token/categories/:token`         |
+| `transaction list`          | `GET /v1/groups/:g/transactions` (filters below)           |
+| `transaction show`          | `GET /v1/groups/:g/transactions/:transaction_token`        |
+| `transaction create`        | `POST /v1/groups/:g/transactions`                          |
+| `transaction update`        | `PATCH /v1/groups/:g/transactions/:transaction_token`      |
+| `transaction delete`        | `DELETE /v1/groups/:g/transactions/:transaction_token`     |
+| `transaction activity`      | `GET /v1/groups/:g/transactions/:t/activity`               |
+
+`transaction list` filters: `from`, `to` (inclusive ISO dates), `category`
+(group category token), `participant` (paid-for **or** owes-a-share), plus
+`take` / `cursor`.
+
+### Routes that do not exist
+
+Do not reintroduce these — the API has no such surface:
+
+- `GET …/snapshot` — the snapshot **is** `GET /v1/groups/:group_token`.
+- `GET …/balances` — derive from the snapshot's `netByCurrency` and
+  `suggestedPayments`.
+- `GET …/participants`, `GET …/categories` — no list endpoints; read
+  `participants` / `groupCategories` off the snapshot.
+- `/v1/api_keys` (any verb) — API-key management is deliberately web-only. The
+  `token` command exists only to say so.
+
+Updates are **PATCH**, never PUT. There is no PUT anywhere in the API, and
+`client.Client` has no `Put` method.
+
+### Semantics worth remembering
+
+- **Every write returns the refreshed group snapshot** (`201`/`200`), including
+  deletes of nested resources. Only `DELETE /v1/groups/:group_token` is a `204`.
+- **`lockVersion` is required on every update.** Omitting it is
+  `400 VALIDATION_FAILED`; a stale value is `409 CONFLICT` with the fresh record
+  under `current`.
+- **`POST /v1/groups` is session-credential only.** A `wari_` developer key gets
+  `403 ACCESS_DENIED`.
+- **`Idempotency-Key` is wired to `POST /v1/groups` only.** Other writes are
+  idempotent through client-supplied tokens.
+- **Errors are RFC 9457 Problem Details**: `type`, `title`, `status`, `detail`,
+  `code`, `instance`, plus `errors` (validation) and `current` (409). Switch on
+  `code`; `VALIDATION_FAILED` is a `400`, not a `422`.
+- **Pagination is keyset**: `take` defaults to 50 and caps at 100; read
+  `pagination.hasMore` / `pagination.cursor`.
 
 ## Conventions
 
@@ -48,4 +104,17 @@ Key routes:
 - Put config and credential behavior in `internal/config`.
 - Keep HTTP mechanics in `internal/client`.
 - Return JSON envelopes by default, and raw data with `--quiet`.
-- Preserve Fizzy's setup pattern: `setup`, `setup claude`, `doctor`, `auth`, `config`, `skill`, `commands`.
+- Preserve Fizzy's setup pattern: `setup`, `setup claude`, `doctor`, `auth`,
+  `config`, `skill`, `commands`.
+- Keep `skills/wariwari/SKILL.md` in lockstep with the commands — it is what an
+  agent follows, so every example must run and every field must be camelCase.
+
+## Checks
+
+```bash
+make build       # go build -o bin/wariwari ./cmd/wariwari
+make check       # gofmt -l, go vet, go test ./internal/...
+```
+
+`internal/commands/contract_test.go` pins the command↔route table above. Update
+it whenever a route moves.

@@ -14,7 +14,9 @@ var participantListCmd = &cobra.Command{
 	Use:     "list [GROUP_TOKEN]",
 	Aliases: []string{"ls"},
 	Short:   "List participants",
-	Args:    cobra.MaximumNArgs(1),
+	Long: `List a group's participants, read out of the group snapshot — there is no
+participants list endpoint.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -23,18 +25,73 @@ var participantListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		data, err := api.Get(cmd.Context(), "/groups/"+group+"/participants", nil)
+		snapshot, err := groupSnapshot(cmd.Context(), group)
 		if err != nil {
 			return err
 		}
-		return printOK(data, "Participants")
+		return printOK(map[string]any{"participants": snapshotList(snapshot, "participants")}, "Participants")
 	},
 }
 
-var participantUpsertCmd = &cobra.Command{
-	Use:   "upsert PARTICIPANT_TOKEN [GROUP_TOKEN]",
-	Short: "Create or update a participant from JSON",
-	Args:  cobra.RangeArgs(1, 2),
+var participantCreateCmd = &cobra.Command{
+	Use:   "create [GROUP_TOKEN]",
+	Short: "Create a participant from JSON",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		group, err := requireGroup(firstArg(args))
+		if err != nil {
+			return err
+		}
+		body, err := participantCommandBody()
+		if err != nil {
+			return err
+		}
+		data, err := api.Post(cmd.Context(), "/groups/"+group+"/participants", body, "")
+		if err != nil {
+			return err
+		}
+		return printOK(data, "Participant created")
+	},
+}
+
+var participantExampleCmd = &cobra.Command{
+	Use:   "example",
+	Short: "Print example request payloads",
+}
+
+var participantExampleCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Example payload for creating a participant",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return printOK(map[string]any{
+			"name":  "Ada",
+			"color": "#1F3A5F",
+		}, "Participant create example")
+	},
+}
+
+var participantExampleUpdateCmd = &cobra.Command{
+	Use:   "update",
+	Short: "Example payload for updating a participant",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return printOK(map[string]any{
+			"name":        "Ada Lovelace",
+			"color":       "#1F3A5F",
+			"lockVersion": 0,
+		}, "Participant update example")
+	},
+}
+
+var participantUpdateCmd = &cobra.Command{
+	Use:   "update PARTICIPANT_TOKEN [GROUP_TOKEN]",
+	Short: "Update a participant from JSON",
+	Long: `Update a participant. lockVersion is required — send the value from the
+current snapshot. A stale value returns 409 CONFLICT with the fresh participant
+under "current".`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -47,11 +104,11 @@ var participantUpsertCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		data, err := api.Put(cmd.Context(), "/groups/"+group+"/participants/"+args[0], body)
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/participants/"+args[0], body)
 		if err != nil {
 			return err
 		}
-		return printOK(data, "Participant saved")
+		return printOK(data, "Participant updated")
 	},
 }
 
@@ -82,16 +139,12 @@ func participantCommandBody() (map[string]any, error) {
 	return parseObject(participantBody)
 }
 
-func optionalArg(args []string, index int) string {
-	if len(args) <= index {
-		return ""
-	}
-	return args[index]
-}
-
 func init() {
 	rootCmd.AddCommand(participantCmd)
-	participantCmd.AddCommand(participantListCmd, participantUpsertCmd, participantDeleteCmd)
-	participantUpsertCmd.Flags().StringVar(&participantBody, "data", "", "JSON request body")
-	participantUpsertCmd.Flags().StringVar(&participantBodyFile, "data-file", "", "Read JSON request body from file")
+	participantCmd.AddCommand(participantListCmd, participantCreateCmd, participantUpdateCmd, participantDeleteCmd, participantExampleCmd)
+	participantExampleCmd.AddCommand(participantExampleCreateCmd, participantExampleUpdateCmd)
+	participantCreateCmd.Flags().StringVar(&participantBody, "data", "", "JSON request body")
+	participantCreateCmd.Flags().StringVar(&participantBodyFile, "data-file", "", "Read JSON request body from file")
+	participantUpdateCmd.Flags().StringVar(&participantBody, "data", "", "JSON request body")
+	participantUpdateCmd.Flags().StringVar(&participantBodyFile, "data-file", "", "Read JSON request body from file")
 }

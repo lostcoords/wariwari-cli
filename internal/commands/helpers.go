@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,13 +26,52 @@ func parseObjectFile(path string) (map[string]any, error) {
 	return parseObject(string(data))
 }
 
-func queryWithPaging(cursor string) map[string]string {
+// pagingQuery builds the keyset pagination query. `take` caps at 100 server
+// side; the global --limit flag is the fallback when --take is not given.
+func pagingQuery(take int, cursor string) map[string]string {
 	q := map[string]string{}
-	if limit > 0 {
-		q["take"] = fmt.Sprintf("%d", limit)
+	if take <= 0 {
+		take = limit
+	}
+	if take > 0 {
+		q["take"] = fmt.Sprintf("%d", take)
 	}
 	if cursor != "" {
 		q["cursor"] = cursor
 	}
 	return q
+}
+
+// groupSnapshot fetches `GET /v1/groups/:group_token`, the full group render
+// state. Participants, categories and balances have no list endpoints of their
+// own — they are read out of this one payload.
+func groupSnapshot(ctx context.Context, group string) (map[string]any, error) {
+	data, err := api.Get(ctx, "/groups/"+group, nil)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, ok := data.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected group snapshot response")
+	}
+	return snapshot, nil
+}
+
+func snapshotList(snapshot map[string]any, key string) []any {
+	rows, _ := snapshot[key].([]any)
+	if rows == nil {
+		rows = []any{}
+	}
+	return rows
+}
+
+func firstArg(args []string) string {
+	return optionalArg(args, 0)
+}
+
+func optionalArg(args []string, index int) string {
+	if len(args) <= index {
+		return ""
+	}
+	return args[index]
 }

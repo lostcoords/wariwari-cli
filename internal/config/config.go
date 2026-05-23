@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	DefaultAPIURL   = "https://wariwari.jp"
+	DefaultAPIURL   = "https://api.wariwari.jp"
 	LocalConfigFile = ".wariwari.yaml"
 	serviceName     = "wariwari"
 )
