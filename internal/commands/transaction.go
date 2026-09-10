@@ -48,8 +48,14 @@ nothing returns an empty page, while a malformed date is 400 INVALID_REQUEST.
 		if err != nil {
 			return err
 		}
+		nextCommand := "wariwari transaction list " + group
+		nextCommand = commandFlag(nextCommand, "from", transactionFrom)
+		nextCommand = commandFlag(nextCommand, "to", transactionTo)
+		nextCommand = commandFlag(nextCommand, "category", transactionCategory)
+		nextCommand = commandFlag(nextCommand, "participant", transactionParticipant)
+		nextCommand = commandTakeFlag(nextCommand, transactionTake)
 		return printOK(data, "Transactions",
-			nextPageCrumb(data, "wariwari transaction list "+group+" --cursor"))
+			nextPageCrumb(data, nextCommand+" --cursor"))
 	},
 }
 
@@ -78,11 +84,14 @@ var transactionShowCmd = &cobra.Command{
 var transactionCreateCmd = &cobra.Command{
 	Use:   "create [GROUP_TOKEN]",
 	Short: "Create a transaction from JSON",
-	Long: `Create an expense or settlement payment. Returns the refreshed group
-snapshot.
+	Long: `Create an expense or settlement payment. Developer API keys are
+supported. Returns the refreshed group snapshot.
 
 Required: description, amountCents, currency, splitType, date, paidByToken,
-splits. splitType is one of equal, percentage, shares, amount.`,
+splits. splitType is one of equal, percentage, shares, amount.
+
+Include an optional client-generated 24-character base58 token to make retries
+an idempotent upsert. Reuse the same token and body when retrying.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -114,6 +123,7 @@ var transactionExampleCreateCmd = &cobra.Command{
 	Short: "Example payload for creating a transaction",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
+			"token":       "9AHTHuAGT7U2CpSfktrfUAYA",
 			"kind":        "expense",
 			"description": "Team dinner",
 			"amountCents": 12000,
@@ -212,8 +222,9 @@ var transactionActivityCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		nextCommand := commandTakeFlag("wariwari transaction activity "+args[0]+" "+group, transactionTake)
 		return printOK(data, "Transaction activity",
-			nextPageCrumb(data, "wariwari transaction activity "+args[0]+" "+group+" --cursor"))
+			nextPageCrumb(data, nextCommand+" --cursor"))
 	},
 }
 

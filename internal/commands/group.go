@@ -36,9 +36,14 @@ Pass that cursor back with --cursor to fetch the next page.`,
 		if err != nil {
 			return err
 		}
+		nextCommand := "wariwari group list"
+		if groupArchived {
+			nextCommand += " --archived"
+		}
+		nextCommand = commandTakeFlag(nextCommand, groupTake)
 		return printOK(data, "Groups",
 			crumb("show", "wariwari group show TOKEN", "Fetch the full group snapshot"),
-			nextPageCrumb(data, "wariwari group list --cursor"))
+			nextPageCrumb(data, nextCommand+" --cursor"))
 	},
 }
 
@@ -86,8 +91,9 @@ var groupActivityCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		nextCommand := commandTakeFlag("wariwari group activity "+group, groupTake)
 		return printOK(data, "Group activity",
-			nextPageCrumb(data, "wariwari group activity "+group+" --cursor"))
+			nextPageCrumb(data, nextCommand+" --cursor"))
 	},
 }
 

@@ -40,10 +40,11 @@ var rootCmd = &cobra.Command{
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		loadStoredToken := cfg == nil
 		if cfg == nil {
 			cfg = config.Load()
+			config.ResolveProfile(cfg, profileFlag)
 		}
-		config.ResolveProfile(cfg, profileFlag)
 		if apiURLFlag != "" {
 			cfg.APIURL = apiURLFlag
 		}
@@ -52,7 +53,7 @@ var rootCmd = &cobra.Command{
 		}
 		if tokenFlag != "" {
 			cfg.Token = tokenFlag
-		} else if cfg.Token == "" {
+		} else if loadStoredToken && cfg.Token == "" {
 			if token, _ := config.LoadToken(cfg.Profile); token != "" {
 				cfg.Token = token
 			}

@@ -35,8 +35,11 @@ is no API route to mint one. The key is shown once; save it with:
 wariwari auth login wari_xxxxxxxx
 ```
 
-A developer key can read and edit existing groups but **cannot create a group**;
-`POST /v1/groups` is session-credential only and answers `403 ACCESS_DENIED`.
+A developer key can read and edit existing groups, including creating
+participants and transactions, but **cannot create a group**; `POST /v1/groups`
+is session-credential only and answers `403 ACCESS_DENIED`. Full access is
+currently enabled, so developer keys have no monthly usage quota; short-term
+per-IP and per-credential rate limits still apply.
 
 ## Configuration
 
@@ -81,6 +84,11 @@ wariwari transaction activity TRANSACTION_TOKEN GROUP_TOKEN
 spending totals. `balance`, `participant list`, and `category list` read that
 same snapshot; the API has no separate endpoints for them.
 
+In `netByCurrency`, positive means the participant is owed money and negative
+means they owe. Transaction reads always contain `timeOfDay`, but it can be
+`null` for an import whose source did not include a time. `paidByToken` can also
+be `null` for historical data whose payer was removed.
+
 ### Filtering transactions
 
 ```bash
@@ -98,7 +106,8 @@ nothing returns an empty page.
 
 `group list`, `transaction list`, and the activity feeds are keyset paginated.
 Responses carry `pagination.hasMore` and `pagination.cursor`; pass the cursor
-back with `--cursor`. `--take` defaults to 50 and caps at 100.
+back with `--cursor`. Generated next-page breadcrumbs preserve the current
+filters, archived mode, and page size. `--take` defaults to 50 and caps at 100.
 
 ```bash
 wariwari group list --take 100 --json
@@ -114,7 +123,7 @@ camelCase, and every write returns the refreshed group snapshot.
 wariwari group create --idempotency-key "$(uuidgen)" \
   --data '{"name":"Trip","icon":"🧳","currency":"JPY","participants":[{"name":"Ada"}]}'
 wariwari group update GROUP_TOKEN --data '{"name":"Trip 2026","lockVersion":1}'
-wariwari participant create GROUP_TOKEN --data '{"name":"Ada"}'
+wariwari participant create GROUP_TOKEN --data '{"token":"qm1mVhS7nyyF99vfPYwfF3nN","name":"Ada"}'
 wariwari participant update PARTICIPANT_TOKEN GROUP_TOKEN --data '{"name":"Ada","lockVersion":0}'
 wariwari participant delete PARTICIPANT_TOKEN GROUP_TOKEN
 wariwari category create GROUP_TOKEN --data '{"name":"Food","emoji":"🍜"}'
@@ -135,6 +144,7 @@ A transaction needs `description`, `amountCents`, `currency`, `splitType`,
 
 ```json
 {
+  "token": "9AHTHuAGT7U2CpSfktrfUAYA",
   "kind": "expense",
   "description": "Team dinner",
   "amountCents": 12000,
@@ -148,6 +158,11 @@ A transaction needs `description`, `amountCents`, `currency`, `splitType`,
   ]
 }
 ```
+
+The optional 24-character base58 `token` makes participant and transaction
+creates safe to retry. Generate it once for the new resource and reuse the same
+token and body on retries; never invent tokens for existing participants or
+categories.
 
 ## Errors
 

@@ -42,6 +42,23 @@ func pagingQuery(take int, cursor string) map[string]string {
 	return q
 }
 
+func commandFlag(command, name, value string) string {
+	if value == "" {
+		return command
+	}
+	return command + " --" + name + " " + value
+}
+
+func commandTakeFlag(command string, take int) string {
+	if take <= 0 {
+		take = limit
+	}
+	if take <= 0 {
+		return command
+	}
+	return commandFlag(command, "take", fmt.Sprintf("%d", take))
+}
+
 // groupSnapshot fetches `GET /v1/groups/:group_token`, the full group render
 // state. Participants, categories and balances have no list endpoints of their
 // own — they are read out of this one payload.

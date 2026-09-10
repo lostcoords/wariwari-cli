@@ -36,7 +36,11 @@ participants list endpoint.`,
 var participantCreateCmd = &cobra.Command{
 	Use:   "create [GROUP_TOKEN]",
 	Short: "Create a participant from JSON",
-	Args:  cobra.MaximumNArgs(1),
+	Long: `Create a participant from JSON. Developer API keys are supported.
+
+Include an optional client-generated 24-character base58 token to make retries
+an idempotent upsert. Reuse the same token and body when retrying.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -67,6 +71,7 @@ var participantExampleCreateCmd = &cobra.Command{
 	Short: "Example payload for creating a participant",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
+			"token": "qm1mVhS7nyyF99vfPYwfF3nN",
 			"name":  "Ada",
 			"color": "#1F3A5F",
 		}, "Participant create example")

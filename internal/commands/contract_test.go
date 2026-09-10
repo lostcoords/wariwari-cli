@@ -281,19 +281,31 @@ func TestCountAndIDsReadCamelCaseCollections(t *testing.T) {
 	}
 }
 
-func TestPaginationBreadcrumbFollowsTheCursor(t *testing.T) {
+func TestPaginationBreadcrumbPreservesTheQuery(t *testing.T) {
 	handler := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"groups":[{"token":"grp_1"}],"pagination":{"hasMore":true,"cursor":"eyJraW5kIjoia2V5c2V0In0"}}`))
 	}
 
 	cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
-	stdout, _, _, err := runRootCommand(t, cfg, handler, "group", "list", "--json")
+	stdout, _, _, err := runRootCommand(t, cfg, handler, "group", "list", "--archived", "--take", "25", "--json")
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if !strings.Contains(stdout, "wariwari group list --cursor eyJraW5kIjoia2V5c2V0In0") {
+	if !strings.Contains(stdout, "wariwari group list --archived --take 25 --cursor eyJraW5kIjoia2V5c2V0In0") {
 		t.Fatalf("expected a next-page breadcrumb, got %s", stdout)
+	}
+
+	stdout, _, _, err = runRootCommand(t, cfg, handler,
+		"transaction", "list", "grp_1",
+		"--from", "2026-01-01", "--to", "2026-01-31",
+		"--category", "cat_1", "--participant", "part_1", "--take", "10", "--json")
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	want := "wariwari transaction list grp_1 --from 2026-01-01 --to 2026-01-31 --category cat_1 --participant part_1 --take 10 --cursor eyJraW5kIjoia2V5c2V0In0"
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("expected the filtered next-page breadcrumb %q, got %s", want, stdout)
 	}
 }
 

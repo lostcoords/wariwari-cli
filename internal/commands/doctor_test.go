@@ -9,6 +9,7 @@ import (
 )
 
 func TestDoctorWarnsWithoutToken(t *testing.T) {
+	t.Setenv("WARIWARI_TOKEN", "must-not-leak-into-injected-config")
 	cfg := &config.Config{APIURL: "http://example.invalid"}
 	stdout, _, requests, err := runRootCommand(t, cfg, okJSON, "doctor", "--json")
 	if err != nil {
