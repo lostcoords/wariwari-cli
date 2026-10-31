@@ -1,7 +1,7 @@
 {
   "name": "wariwari",
   "version": "0.1.0",
-  "description": "WariWari integration for Claude Code. Manage groups, participants, categories, transactions, and balances.",
+  "description": "WariWari integration for Claude Code. Manage groups, participants, categories, transactions, payments, balances, stats, exports, and access requests.",
   "author": {
     "name": "WariWari",
     "email": "support@wariwari.jp"
