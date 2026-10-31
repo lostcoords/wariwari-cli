@@ -1,66 +1,102 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+# Installs the wariwari CLI into ~/.local/bin, checked against the release's checksums.txt.
+# Served at https://wariwari.jp/install.sh from github.com/lostcoords/wariwari-cli.
+#
+#   curl -fsSL https://wariwari.jp/install.sh | sh
+#   curl -fsSL https://wariwari.jp/install.sh | WARIWARI_VERSION=v0.1.0 sh
+#
+# WARIWARI_BIN_DIR changes the install directory. WARIWARI_RELEASE_URL points at a directory
+# holding checksums.txt and the archives, for testing a local build.
+set -eu
 
 REPO="lostcoords/wariwari-cli"
-INSTALL_DIR="${WARIWARI_BIN_DIR:-$HOME/.local/bin}"
+BIN="${WARIWARI_BIN_DIR:-$HOME/.local/bin}"
 
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m)
+# digest FILE prints the file's SHA-256.
+digest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
 
-case "$ARCH" in
-  x86_64|amd64) ARCH="amd64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
-  *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
-esac
+download() {
+  case "$1" in
+    file://*) cp "${1#file://}" "$2" ;;
+    *) curl -fsSL "$1" -o "$2" ;;
+  esac
+}
 
-case "$OS" in
-  linux|darwin) ;;
-  mingw*|msys*|cygwin*) OS="windows" ;;
-  *) echo "Unsupported OS: $OS"; exit 1 ;;
-esac
+# path_hint prints how to put $BIN on PATH when it is not there yet.
+path_hint() {
+  case ":$PATH:" in
+    *":$BIN:"*) return 0 ;;
+  esac
+  shown=$BIN
+  case "$BIN" in
+    "$HOME"/*) shown="\$HOME${BIN#"$HOME"}" ;;
+  esac
+  echo
+  echo "Add $shown to PATH:"
+  case "${SHELL##*/}" in
+    fish) echo "  fish_add_path $shown" ;;
+    zsh) echo "  echo 'export PATH=\"$shown:\$PATH\"' >> ~/.zshrc" ;;
+    bash) echo "  echo 'export PATH=\"$shown:\$PATH\"' >> ~/.bashrc" ;;
+    *) echo "  export PATH=\"$shown:\$PATH\"" ;;
+  esac
+}
 
-VERSION=$(curl -sI "https://github.com/$REPO/releases/latest" | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n' || true)
-if [ -z "$VERSION" ]; then
-  echo "Failed to determine latest version"
-  exit 1
-fi
+main() {
+  case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=darwin ;;
+    *) echo "wariwari: no build for $(uname -s); use go install instead" >&2; exit 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64 | amd64) arch=amd64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    *) echo "wariwari: no build for $(uname -m); use go install instead" >&2; exit 1 ;;
+  esac
 
-ASSET="wariwari_${VERSION}_${OS}_${ARCH}.tar.gz"
-if [ "$OS" = "windows" ]; then
-  ASSET="wariwari_${VERSION}_${OS}_${ARCH}.zip"
-fi
+  if [ -n "${WARIWARI_RELEASE_URL:-}" ]; then
+    release=$WARIWARI_RELEASE_URL
+  elif [ -n "${WARIWARI_VERSION:-}" ]; then
+    release="https://github.com/$REPO/releases/download/v${WARIWARI_VERSION#v}"
+  else
+    release="https://github.com/$REPO/releases/latest/download"
+  fi
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
 
-curl -fsSL "https://github.com/$REPO/releases/download/${VERSION}/${ASSET}" -o "$TMPDIR/$ASSET"
-curl -fsSL "https://github.com/$REPO/releases/download/${VERSION}/checksums.txt" -o "$TMPDIR/checksums.txt"
+  # GoReleaser names archives wariwari_<version without v>_<os>_<arch>.tar.gz; the checksum
+  # file lists them, so it also tells us the version without asking the GitHub API.
+  download "$release/checksums.txt" "$work/checksums.txt"
+  line=$(grep "  wariwari_.*_${os}_${arch}\.tar\.gz\$" "$work/checksums.txt" || true)
+  if [ -z "$line" ]; then
+    echo "wariwari: no $os/$arch archive in $release/checksums.txt" >&2
+    exit 1
+  fi
+  expected=${line%% *}
+  asset=${line##* }
 
-cd "$TMPDIR"
-EXPECTED=$(grep "  $ASSET$" checksums.txt | awk '{print $1}')
-if [ -z "$EXPECTED" ]; then
-  echo "ERROR: checksum not found for $ASSET"
-  exit 1
-fi
-ACTUAL=$(shasum -a 256 "$ASSET" | awk '{print $1}')
-if [ "$EXPECTED" != "$ACTUAL" ]; then
-  echo "ERROR: checksum mismatch"
-  exit 1
-fi
+  download "$release/$asset" "$work/$asset"
+  if [ "$(digest "$work/$asset")" != "$expected" ]; then
+    echo "wariwari: checksum mismatch for $asset; nothing installed" >&2
+    exit 1
+  fi
 
-if [ "$OS" = "windows" ]; then
-  unzip -q "$ASSET"
-else
-  tar -xzf "$ASSET"
-fi
+  tar -xzf "$work/$asset" -C "$work" wariwari
+  mkdir -p "$BIN"
+  install -m 755 "$work/wariwari" "$BIN/wariwari"
+  echo "installed $("$BIN/wariwari" --version) to $BIN/wariwari"
 
-mkdir -p "$INSTALL_DIR"
-BINARY="wariwari"
-if [ "$OS" = "windows" ]; then
-  BINARY="wariwari.exe"
-fi
-cp "$TMPDIR/$BINARY" "$INSTALL_DIR/$BINARY"
-chmod +x "$INSTALL_DIR/$BINARY"
+  path_hint
+  echo
+  echo "Next: wariwari auth login wari_... (create a key under Account -> API keys),"
+  echo "then wariwari skill install to give your coding agent the WariWari skill."
+  echo "Upgrade later with: wariwari upgrade"
+}
 
-echo "wariwari ${VERSION} installed to $INSTALL_DIR/$BINARY"
-"$INSTALL_DIR/$BINARY" setup || echo "Run '$INSTALL_DIR/$BINARY setup' to get started."
+main "$@"

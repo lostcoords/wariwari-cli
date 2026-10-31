@@ -19,5 +19,6 @@ jobs:
       - run: gofmt -l . | tee /tmp/gofmt.txt
       - run: test ! -s /tmp/gofmt.txt
       - run: go vet ./...
+      - run: shellcheck -s sh scripts/*.sh
       - run: go test ./internal/...
       - run: go build -o bin/wariwari ./cmd/wariwari
