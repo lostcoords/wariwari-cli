@@ -5,26 +5,55 @@
 ## Quick Start
 
 ```bash
-make build
-./bin/wariwari setup
-./bin/wariwari doctor
-./bin/wariwari group list --json
-./bin/wariwari transaction example create --json
+curl -fsSL https://wariwari.jp/install.sh | sh
+wariwari auth login wari_xxxxxxxx
+wariwari doctor
+wariwari group list --json
+wariwari skill install
 ```
 
 ## Installation
 
-From source:
+Install script (Linux and macOS, into `~/.local/bin`):
+
+```bash
+curl -fsSL https://wariwari.jp/install.sh | sh
+```
+
+Pin a release with `WARIWARI_VERSION`:
+
+```bash
+curl -fsSL https://wariwari.jp/install.sh | WARIWARI_VERSION=v0.1.0 sh
+```
+
+The script checks the archive against the release's `checksums.txt` and prints
+a `PATH` hint if `~/.local/bin` is not on it. `WARIWARI_BIN_DIR` installs
+somewhere else.
+
+Homebrew:
+
+```bash
+brew install lostcoords/tap/wariwari
+```
+
+From source, with Go:
 
 ```bash
 go install github.com/lostcoords/wariwari-cli/cmd/wariwari@latest
 ```
 
-Local build:
+### Upgrading
 
 ```bash
-make build
+wariwari upgrade --check     # only report whether an update exists
+wariwari upgrade             # install the latest release
+wariwari upgrade --version v0.1.0
 ```
+
+`upgrade` verifies the download against `checksums.txt` and replaces the binary
+in place. A Homebrew install runs `brew upgrade lostcoords/tap/wariwari`
+instead. If the agent skill is installed, `upgrade` refreshes it from the new
+binary.
 
 ## Authentication
 
@@ -248,6 +277,7 @@ wariwari setup claude
 The embedded skill installs to `~/.agents/skills/wariwari/SKILL.md`.
 `wariwari skill install` also installs the skill to the Codex skill directory.
 `wariwari setup claude` also links it into `~/.claude/skills/wariwari`.
+`wariwari upgrade` refreshes an installed skill along with the binary.
 
 Example payloads:
 

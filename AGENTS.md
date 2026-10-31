@@ -149,6 +149,24 @@ Updates are **PATCH**, never PUT. There is no PUT anywhere in the API, and
 - Keep `skills/wariwari/SKILL.md` in lockstep with the commands — it is what an
   agent follows, so every example must run and every field must be camelCase.
 
+## Releasing
+
+The version lives in the tag; GoReleaser stamps it into `main.version`, which
+`wariwari --version` prints. `.claude-plugin/plugin.json` must carry the same
+version, and the release workflow fails if it doesn't.
+
+1. Bump `.claude-plugin/plugin.json` to `X.Y.Z` and commit.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`. The release workflow publishes
+   the archives and `checksums.txt` to GitHub Releases.
+3. `scripts/homebrew-formula.sh X.Y.Z > Formula/wariwari.rb` in a checkout of
+   `lostcoords/homebrew-tap`, then commit and push the tap.
+
+`scripts/install.sh` (served at `https://wariwari.jp/install.sh`) and
+`wariwari upgrade` read the release's `checksums.txt`, so archive names must
+stay `wariwari_<version>_<os>_<arch>.tar.gz`. Both honour
+`WARIWARI_RELEASE_URL` to test against a local `goreleaser release --snapshot
+--clean` build in `dist/`.
+
 ## Checks
 
 ```bash

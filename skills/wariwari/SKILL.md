@@ -63,6 +63,10 @@ Developer keys cannot reach session-only routes (sessions, sign-in identities,
 payment methods, device tokens, email change, account deletion, imports, group
 creation); the CLI has no commands for them. Ask the user to do those in the app.
 
+If a command or field in this skill is missing from the CLI, run
+`wariwari upgrade --check`; `wariwari upgrade` installs the latest release and
+refreshes this skill.
+
 For Codex-style agents, `wariwari skill install` writes the skill to both
 `~/.agents/skills/wariwari/` and the Codex skill directory.
 
