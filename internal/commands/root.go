@@ -67,6 +67,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	rootCmd.SetVersionTemplate("wariwari {{.Version}}\n")
 	rootCmd.PersistentFlags().StringVar(&tokenFlag, "token", "", "API bearer token")
 	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "Named profile to use")
 	rootCmd.PersistentFlags().StringVar(&apiURLFlag, "api-url", "", "API base URL")

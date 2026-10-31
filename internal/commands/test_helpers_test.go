@@ -118,6 +118,8 @@ func resetCommandGlobals() {
 	groupStatsWeek = ""
 	invitationRole = ""
 	invitationExpiresIn = ""
+	upgradeVersion = ""
+	upgradeCheck = false
 	resetFlagState(rootCmd)
 }
 
