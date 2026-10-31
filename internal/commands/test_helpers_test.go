@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,12 +11,14 @@ import (
 	"github.com/lostcoords/wariwari-cli/internal/client"
 	"github.com/lostcoords/wariwari-cli/internal/config"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 type requestRecord struct {
 	Method string
 	Path   string
 	Header http.Header
+	Body   string
 }
 
 func runRootCommand(t *testing.T, cfgValue *config.Config, handler http.HandlerFunc, args ...string) (string, string, []requestRecord, error) {
@@ -23,10 +26,12 @@ func runRootCommand(t *testing.T, cfgValue *config.Config, handler http.HandlerF
 
 	var records []requestRecord
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
 		records = append(records, requestRecord{
 			Method: r.Method,
 			Path:   r.URL.RequestURI(),
 			Header: r.Header.Clone(),
+			Body:   string(body),
 		})
 		handler(w, r)
 	}))
@@ -98,4 +103,29 @@ func resetCommandGlobals() {
 	transactionTo = ""
 	transactionCategory = ""
 	transactionParticipant = ""
+	accountBody = ""
+	accountBodyFile = ""
+	paymentBody = ""
+	paymentBodyFile = ""
+	lockVersion = 0
+	groupOutput = ""
+	groupFxFrom = ""
+	groupStatsDateRange = ""
+	groupStatsParticipant = ""
+	groupStatsCategory = ""
+	groupStatsDate = ""
+	groupStatsMonth = ""
+	groupStatsWeek = ""
+	invitationRole = ""
+	invitationExpiresIn = ""
+	resetFlagState(rootCmd)
+}
+
+// resetFlagState clears cobra's "changed" marks, which survive between
+// Execute calls and would satisfy a required flag the next test omits.
+func resetFlagState(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
+	for _, child := range cmd.Commands() {
+		resetFlagState(child)
+	}
 }

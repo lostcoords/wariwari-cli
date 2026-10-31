@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,6 +26,8 @@ type Client struct {
 type Error struct {
 	StatusCode int
 	Body       map[string]any
+	// RetryAfter is the 429 Retry-After header, in seconds, when sent.
+	RetryAfter string
 }
 
 func (e *Error) Error() string {
@@ -64,6 +67,9 @@ func (e *Error) Problem() map[string]any {
 	for key, value := range e.Body {
 		problem[key] = value
 	}
+	if e.RetryAfter != "" {
+		problem["retryAfter"] = e.RetryAfter
+	}
 	return problem
 }
 
@@ -79,25 +85,70 @@ func New(baseURL, token, version string) *Client {
 }
 
 func (c *Client) Get(ctx context.Context, path string, query map[string]string) (any, error) {
-	return c.Do(ctx, http.MethodGet, path, query, nil, "")
+	return c.Do(ctx, http.MethodGet, path, query, nil, nil)
 }
 
 func (c *Client) Post(ctx context.Context, path string, body any, idempotencyKey string) (any, error) {
-	return c.Do(ctx, http.MethodPost, path, nil, body, idempotencyKey)
+	var header http.Header
+	if idempotencyKey != "" {
+		header = http.Header{"Idempotency-Key": {idempotencyKey}}
+	}
+	return c.Do(ctx, http.MethodPost, path, nil, body, header)
 }
 
 func (c *Client) Patch(ctx context.Context, path string, body any) (any, error) {
-	return c.Do(ctx, http.MethodPatch, path, nil, body, "")
+	return c.Do(ctx, http.MethodPatch, path, nil, body, nil)
 }
 
 func (c *Client) Delete(ctx context.Context, path string) (any, error) {
-	return c.Do(ctx, http.MethodDelete, path, nil, nil, "")
+	return c.Do(ctx, http.MethodDelete, path, nil, nil, nil)
 }
 
-func (c *Client) Do(ctx context.Context, method, path string, query map[string]string, body any, idempotencyKey string) (any, error) {
-	u, err := url.Parse(c.BaseURL + "/v1" + path)
+// DeleteRevision deletes a record that guards against stale deletes: the API
+// requires the record's last-read lockVersion in WariWari-Expected-Revision.
+func (c *Client) DeleteRevision(ctx context.Context, path string, lockVersion int) (any, error) {
+	header := http.Header{"WariWari-Expected-Revision": {strconv.Itoa(lockVersion)}}
+	return c.Do(ctx, http.MethodDelete, path, nil, nil, header)
+}
+
+// GetRaw fetches a non-JSON body, such as the CSV export.
+func (c *Client) GetRaw(ctx context.Context, path, accept string) ([]byte, error) {
+	resp, data, err := c.send(ctx, http.MethodGet, path, nil, nil, http.Header{"Accept": {accept}})
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, apiError(resp, data)
+	}
+	return data, nil
+}
+
+// Do sends a JSON request. A 204 No Content returns nil data.
+func (c *Client) Do(ctx context.Context, method, path string, query map[string]string, body any, header http.Header) (any, error) {
+	resp, data, err := c.send(ctx, method, path, query, body, header)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, apiError(resp, data)
+	}
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+
+	var decoded any
+	if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return nil, fmt.Errorf("decode response: %w", err)
+		}
+	}
+	return decoded, nil
+}
+
+func (c *Client) send(ctx context.Context, method, path string, query map[string]string, body any, header http.Header) (*http.Response, []byte, error) {
+	u, err := url.Parse(c.BaseURL + "/v1" + path)
+	if err != nil {
+		return nil, nil, err
 	}
 	if len(query) > 0 {
 		q := u.Query()
@@ -113,14 +164,14 @@ func (c *Client) Do(ctx context.Context, method, path string, query map[string]s
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		r = bytes.NewReader(data)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.UserAgent)
@@ -130,36 +181,25 @@ func (c *Client) Do(ctx context.Context, method, path string, query map[string]s
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-	if idempotencyKey != "" {
-		req.Header.Set("Idempotency-Key", idempotencyKey)
+	for key, values := range header {
+		req.Header[http.CanonicalHeaderKey(key)] = values
 	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
-	// Only `DELETE /v1/groups/:group_token` answers 204; every other delete
-	// returns the refreshed group snapshot.
-	if resp.StatusCode == http.StatusNoContent {
-		return map[string]any{"deleted": true}, nil
-	}
-
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var decoded any
-	if len(bytes.TrimSpace(data)) > 0 {
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			return nil, fmt.Errorf("decode response: %w", err)
-		}
-	}
+	return resp, data, nil
+}
 
-	if resp.StatusCode >= 400 {
-		body, _ := decoded.(map[string]any)
-		return nil, &Error{StatusCode: resp.StatusCode, Body: body}
-	}
-	return decoded, nil
+func apiError(resp *http.Response, data []byte) *Error {
+	var body map[string]any
+	_ = json.Unmarshal(data, &body)
+	return &Error{StatusCode: resp.StatusCode, Body: body, RetryAfter: resp.Header.Get("Retry-After")}
 }

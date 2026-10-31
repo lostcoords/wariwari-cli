@@ -25,7 +25,7 @@ var doctorCmd = &cobra.Command{
 			return printOK(map[string]any{"checks": checks}, "WariWari CLI health check")
 		}
 
-		me, err := api.Get(cmd.Context(), "/me", nil)
+		me, err := api.Get(cmd.Context(), "/account", nil)
 		if err != nil {
 			checks = append(checks,
 				map[string]any{"name": "auth_check", "status": "fail", "message": fmt.Sprintf("Live API auth check failed: %v", err)},

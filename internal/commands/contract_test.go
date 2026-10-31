@@ -2,6 +2,8 @@ package commands
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -125,7 +127,7 @@ func TestCommandContractsUseCurrentAPIRoutes(t *testing.T) {
 		},
 		{
 			name:       "transaction delete soft-deletes",
-			args:       []string{"transaction", "delete", "txn_1", "grp_1"},
+			args:       []string{"transaction", "delete", "txn_1", "grp_1", "--lock-version", "1"},
 			wantMethod: http.MethodDelete,
 			wantPath:   "/v1/groups/grp_1/transactions/txn_1",
 		},
@@ -142,10 +144,148 @@ func TestCommandContractsUseCurrentAPIRoutes(t *testing.T) {
 			wantPath:   "/v1/groups/grp_1/activity",
 		},
 		{
-			name:       "me reads the identity endpoint",
+			name:       "me reads the account",
 			args:       []string{"me"},
 			wantMethod: http.MethodGet,
-			wantPath:   "/v1/me",
+			wantPath:   "/v1/account",
+		},
+		{
+			name:       "account show reads the account",
+			args:       []string{"account", "show"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/v1/account",
+		},
+		{
+			name:       "account update uses patch",
+			args:       []string{"account", "update", "--data", `{"locale":"es"}`},
+			wantMethod: http.MethodPatch,
+			wantPath:   "/v1/account",
+		},
+		{
+			name:       "group delete soft-deletes",
+			args:       []string{"group", "delete", "grp_1", "--lock-version", "2"},
+			wantMethod: http.MethodDelete,
+			wantPath:   "/v1/groups/grp_1",
+		},
+		{
+			name:       "group archive posts the archival",
+			args:       []string{"group", "archive", "grp_1"},
+			wantMethod: http.MethodPost,
+			wantPath:   "/v1/groups/grp_1/archival",
+		},
+		{
+			name:       "group unarchive deletes the archival",
+			args:       []string{"group", "unarchive", "grp_1"},
+			wantMethod: http.MethodDelete,
+			wantPath:   "/v1/groups/grp_1/archival",
+		},
+		{
+			name:       "group stats passes token filters",
+			args:       []string{"group", "stats", "grp_1", "--date-range", "this_month", "--participant", "part_1", "--category", "cat_1"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/v1/groups/grp_1/stats?category=cat_1&dateRange=this_month&participant=part_1",
+		},
+		{
+			name:       "group fx-rate reads the rate",
+			args:       []string{"group", "fx-rate", "grp_1", "--from", "USD"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/v1/groups/grp_1/fx_rate?from=USD",
+		},
+		{
+			name:       "group settings reads the settings",
+			args:       []string{"group", "settings", "grp_1"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/v1/groups/grp_1/settings",
+		},
+		{
+			name:       "group settings update uses patch",
+			args:       []string{"group", "settings", "update", "grp_1", "--data", `{"lockVersion":1}`},
+			wantMethod: http.MethodPatch,
+			wantPath:   "/v1/groups/grp_1/settings",
+		},
+		{
+			name:       "participant balance reads the ledger",
+			args:       []string{"participant", "balance", "part_1", "grp_1"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/v1/groups/grp_1/participants/part_1/balance",
+		},
+		{
+			name:       "participant delete sends the revision",
+			args:       []string{"participant", "delete", "part_1", "grp_1", "--lock-version", "1"},
+			wantMethod: http.MethodDelete,
+			wantPath:   "/v1/groups/grp_1/participants/part_1",
+		},
+		{
+			name:       "category delete sends the revision",
+			args:       []string{"category", "delete", "cat_1", "grp_1", "--lock-version", "1"},
+			wantMethod: http.MethodDelete,
+			wantPath:   "/v1/groups/grp_1/categories/cat_1",
+		},
+		{
+			name:       "payment create uses collection post",
+			args:       []string{"payment", "create", "grp_1", "--data", `{"fromToken":"part_1","toToken":"part_2","amountCents":100}`},
+			wantMethod: http.MethodPost,
+			wantPath:   "/v1/groups/grp_1/payments",
+		},
+		{
+			name:       "payment update uses patch",
+			args:       []string{"payment", "update", "pay_1", "grp_1", "--data", `{"lockVersion":0}`},
+			wantMethod: http.MethodPatch,
+			wantPath:   "/v1/groups/grp_1/payments/pay_1",
+		},
+		{
+			name:       "invitation create posts",
+			args:       []string{"invitation", "create", "grp_1", "--role", "editor", "--expires-in", "7d"},
+			wantMethod: http.MethodPost,
+			wantPath:   "/v1/groups/grp_1/invitations",
+		},
+		{
+			name:       "invitation revoke deletes",
+			args:       []string{"invitation", "revoke", "inv_1", "grp_1"},
+			wantMethod: http.MethodDelete,
+			wantPath:   "/v1/groups/grp_1/invitations/inv_1",
+		},
+		{
+			name:       "access-request status reads your own request",
+			args:       []string{"access-request", "status", "grp_1"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/v1/groups/grp_1/access_request",
+		},
+		{
+			name:       "access-request create asks to join",
+			args:       []string{"access-request", "create", "grp_1"},
+			wantMethod: http.MethodPost,
+			wantPath:   "/v1/groups/grp_1/access_request",
+		},
+		{
+			name:       "access-request list reads pending requests",
+			args:       []string{"access-request", "list", "grp_1"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/v1/groups/grp_1/access_requests",
+		},
+		{
+			name:       "access-request approve posts the approval",
+			args:       []string{"access-request", "approve", "7", "grp_1"},
+			wantMethod: http.MethodPost,
+			wantPath:   "/v1/groups/grp_1/access_requests/7/approval",
+		},
+		{
+			name:       "access-request decline posts the decline",
+			args:       []string{"access-request", "decline", "7", "grp_1"},
+			wantMethod: http.MethodPost,
+			wantPath:   "/v1/groups/grp_1/access_requests/7/decline",
+		},
+		{
+			name:       "search sends the query",
+			args:       []string{"search", "ramen", "dinner"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/v1/search?q=ramen+dinner",
+		},
+		{
+			name:       "feedback posts the message",
+			args:       []string{"feedback", "Love", "it"},
+			wantMethod: http.MethodPost,
+			wantPath:   "/v1/feedback",
 		},
 	}
 
@@ -172,6 +312,113 @@ func TestCommandContractsUseCurrentAPIRoutes(t *testing.T) {
 				t.Fatalf("authorization header = %q", got)
 			}
 		})
+	}
+}
+
+func TestGuardedDeletesSendTheExpectedRevision(t *testing.T) {
+	for _, args := range [][]string{
+		{"group", "delete", "grp_1"},
+		{"participant", "delete", "part_1", "grp_1"},
+		{"category", "delete", "cat_1", "grp_1"},
+		{"transaction", "delete", "txn_1", "grp_1"},
+	} {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
+			_, _, requests, err := runRootCommand(t, cfg, okJSON, args...)
+			if err == nil || !strings.Contains(err.Error(), "lock-version") {
+				t.Fatalf("error = %v, want the required --lock-version flag", err)
+			}
+			if len(requests) != 0 {
+				t.Fatalf("expected no request without --lock-version, got %d", len(requests))
+			}
+
+			_, _, requests, err = runRootCommand(t, cfg, okJSON, append(args, "--lock-version", "3")...)
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if got := requests[0].Header.Get("WariWari-Expected-Revision"); got != "3" {
+				t.Fatalf("WariWari-Expected-Revision = %q, want 3", got)
+			}
+		})
+	}
+}
+
+func TestWriteBodiesMatchTheSpec(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"account update is flat", []string{"account", "update", "--data", `{"name":"Ada"}`}, `{"name":"Ada"}`},
+		{"invitation create sends role and expiry", []string{"invitation", "create", "grp_1", "--role", "read_only", "--expires-in", "24h"}, `{"expiresIn":"24h","membershipRole":"read_only"}`},
+		{"invitation create defaults to an empty body", []string{"invitation", "create", "grp_1"}, `{}`},
+		{"feedback joins the message", []string{"feedback", "Love", "it"}, `{"body":"Love it"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
+			_, _, requests, err := runRootCommand(t, cfg, okJSON, tt.args...)
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if requests[0].Body != tt.want {
+				t.Fatalf("body = %s, want %s", requests[0].Body, tt.want)
+			}
+		})
+	}
+}
+
+func TestNoContentWritesReportTheirOwnResult(t *testing.T) {
+	noContent := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"group", "archive", "grp_1"}, `"archived": true`},
+		{[]string{"group", "unarchive", "grp_1"}, `"archived": false`},
+		{[]string{"group", "delete", "grp_1", "--lock-version", "0"}, `"deleted": true`},
+		{[]string{"invitation", "revoke", "inv_1", "grp_1"}, `"revoked": true`},
+		{[]string{"access-request", "decline", "7", "grp_1"}, `"declined": true`},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args[:2], " "), func(t *testing.T) {
+			cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
+			stdout, _, _, err := runRootCommand(t, cfg, noContent, append(tt.args, "--json")...)
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if !strings.Contains(stdout, tt.want) {
+				t.Fatalf("output missing %s:\n%s", tt.want, stdout)
+			}
+		})
+	}
+}
+
+func TestGroupExportWritesTheCSV(t *testing.T) {
+	csv := "date,description,amount\n2026-05-23,Dinner,12000\n"
+	handler := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		_, _ = w.Write([]byte(csv))
+	}
+	cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
+
+	stdout, _, requests, err := runRootCommand(t, cfg, handler, "group", "export", "grp_1")
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if requests[0].Path != "/v1/groups/grp_1/csv_export" || requests[0].Header.Get("Accept") != "text/csv" {
+		t.Fatalf("got %s with Accept %q", requests[0].Path, requests[0].Header.Get("Accept"))
+	}
+	if stdout != csv {
+		t.Fatalf("stdout = %q, want the raw CSV", stdout)
+	}
+
+	path := filepath.Join(t.TempDir(), "trip.csv")
+	if _, _, _, err := runRootCommand(t, cfg, handler, "group", "export", "grp_1", "--output", path); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if written, _ := os.ReadFile(path); string(written) != csv {
+		t.Fatalf("file = %q, want the raw CSV", written)
 	}
 }
 

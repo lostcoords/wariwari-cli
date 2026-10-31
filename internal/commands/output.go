@@ -28,6 +28,7 @@ type response struct {
 func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
 
@@ -85,8 +86,13 @@ func printErr(err error) {
 				fmt.Fprintf(errOut, "  %s: %v\n", name, fields[name])
 			}
 		}
-		if apiErr.Code() == "CONFLICT" {
+		switch {
+		case apiErr.Code() == "CONFLICT" && apiErr.Body["current"] != nil:
 			fmt.Fprintln(errOut, "  Re-read the record and retry with the lockVersion from `current`.")
+		case apiErr.Code() == "CONFLICT":
+			fmt.Fprintln(errOut, "  Re-read the record and retry with its latest lockVersion.")
+		case apiErr.RetryAfter != "":
+			fmt.Fprintf(errOut, "  Retry after %s seconds.\n", apiErr.RetryAfter)
 		}
 	}
 }
@@ -181,7 +187,7 @@ func jsonShape(v any) (any, error) {
 
 // collectionKeys are the camelCase array fields the API nests rows under, in
 // the order --count and --ids-only should prefer them.
-var collectionKeys = []string{"groups", "transactions", "participants", "groupCategories", "activity", "suggestedPayments"}
+var collectionKeys = []string{"groups", "transactions", "participants", "groupCategories", "activity", "suggestedPayments", "accessRequests"}
 
 func countData(v any) int {
 	switch data := v.(type) {

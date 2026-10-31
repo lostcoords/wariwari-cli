@@ -101,7 +101,7 @@ an idempotent upsert. Reuse the same token and body when retrying.`,
 		if err != nil {
 			return err
 		}
-		body, err := transactionCommandBody()
+		body, err := bodyFrom(transactionBody, transactionBodyFile)
 		if err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ under "current". Sending splits replaces all existing splits.`,
 		if err != nil {
 			return err
 		}
-		body, err := transactionCommandBody()
+		body, err := bodyFrom(transactionBody, transactionBodyFile)
 		if err != nil {
 			return err
 		}
@@ -189,6 +189,7 @@ under "current". Sending splits replaces all existing splits.`,
 var transactionDeleteCmd = &cobra.Command{
 	Use:   "delete TRANSACTION_TOKEN [GROUP_TOKEN]",
 	Short: "Soft-delete a transaction",
+	Long:  guardedDeleteHelp,
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -198,7 +199,7 @@ var transactionDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/transactions/"+args[0])
+		data, err := api.DeleteRevision(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], lockVersion)
 		if err != nil {
 			return err
 		}
@@ -228,14 +229,8 @@ var transactionActivityCmd = &cobra.Command{
 	},
 }
 
-func transactionCommandBody() (map[string]any, error) {
-	if transactionBodyFile != "" {
-		return parseObjectFile(transactionBodyFile)
-	}
-	return parseObject(transactionBody)
-}
-
 func init() {
+	addLockVersionFlag(transactionDeleteCmd)
 	rootCmd.AddCommand(transactionCmd)
 	transactionCmd.AddCommand(transactionListCmd, transactionShowCmd, transactionCreateCmd, transactionUpdateCmd, transactionDeleteCmd, transactionActivityCmd, transactionExampleCmd)
 	transactionExampleCmd.AddCommand(transactionExampleCreateCmd, transactionExampleUpdateCmd)

@@ -28,7 +28,7 @@ func TestDoctorChecksLiveAPI(t *testing.T) {
 	stdout, _, requests, err := runRootCommand(t, cfg, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/v1/me":
+		case "/v1/account":
 			_, _ = w.Write([]byte(`{"id":1,"emailAddress":"doctor@example.com","name":null}`))
 		case "/v1/groups/grp_1":
 			_, _ = w.Write([]byte(`{"token":"grp_1"}`))

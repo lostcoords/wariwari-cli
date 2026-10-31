@@ -49,7 +49,7 @@ an idempotent upsert. Reuse the same token and body when retrying.`,
 		if err != nil {
 			return err
 		}
-		body, err := participantCommandBody()
+		body, err := bodyFrom(participantBody, participantBodyFile)
 		if err != nil {
 			return err
 		}
@@ -105,7 +105,7 @@ under "current".`,
 		if err != nil {
 			return err
 		}
-		body, err := participantCommandBody()
+		body, err := bodyFrom(participantBody, participantBodyFile)
 		if err != nil {
 			return err
 		}
@@ -120,6 +120,7 @@ under "current".`,
 var participantDeleteCmd = &cobra.Command{
 	Use:   "delete PARTICIPANT_TOKEN [GROUP_TOKEN]",
 	Short: "Soft-delete a participant",
+	Long:  guardedDeleteHelp,
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -129,7 +130,7 @@ var participantDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/participants/"+args[0])
+		data, err := api.DeleteRevision(cmd.Context(), "/groups/"+group+"/participants/"+args[0], lockVersion)
 		if err != nil {
 			return err
 		}
@@ -137,16 +138,36 @@ var participantDeleteCmd = &cobra.Command{
 	},
 }
 
-func participantCommandBody() (map[string]any, error) {
-	if participantBodyFile != "" {
-		return parseObjectFile(participantBodyFile)
-	}
-	return parseObject(participantBody)
+var participantBalanceCmd = &cobra.Command{
+	Use:   "balance PARTICIPANT_TOKEN [GROUP_TOKEN]",
+	Short: "Show how a participant's balance adds up",
+	Long: `Show one participant's balance ledger in the group currency: balanceCents
+(positive means they are owed) and four lines, paid_for_others, paid_for_you,
+sent and received, each listing the transactions behind it by token.
+otherCurrencies is true when they also have transactions kept in another
+currency, which are balanced separately and left out here.`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		group, err := requireGroup(optionalArg(args, 1))
+		if err != nil {
+			return err
+		}
+		data, err := api.Get(cmd.Context(), "/groups/"+group+"/participants/"+args[0]+"/balance", nil)
+		if err != nil {
+			return err
+		}
+		return printOK(data, "Participant balance",
+			crumb("transactions", "wariwari transaction list "+group+" --participant "+args[0], "List the transactions behind it"))
+	},
 }
 
 func init() {
+	addLockVersionFlag(participantDeleteCmd)
 	rootCmd.AddCommand(participantCmd)
-	participantCmd.AddCommand(participantListCmd, participantCreateCmd, participantUpdateCmd, participantDeleteCmd, participantExampleCmd)
+	participantCmd.AddCommand(participantListCmd, participantBalanceCmd, participantCreateCmd, participantUpdateCmd, participantDeleteCmd, participantExampleCmd)
 	participantExampleCmd.AddCommand(participantExampleCreateCmd, participantExampleUpdateCmd)
 	participantCreateCmd.Flags().StringVar(&participantBody, "data", "", "JSON request body")
 	participantCreateCmd.Flags().StringVar(&participantBodyFile, "data-file", "", "Read JSON request body from file")

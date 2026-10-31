@@ -45,7 +45,7 @@ var categoryCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		body, err := categoryCommandBody()
+		body, err := bodyFrom(categoryBody, categoryBodyFile)
 		if err != nil {
 			return err
 		}
@@ -101,7 +101,7 @@ snapshot. A stale value returns 409 CONFLICT with the fresh category under
 		if err != nil {
 			return err
 		}
-		body, err := categoryCommandBody()
+		body, err := bodyFrom(categoryBody, categoryBodyFile)
 		if err != nil {
 			return err
 		}
@@ -116,6 +116,7 @@ snapshot. A stale value returns 409 CONFLICT with the fresh category under
 var categoryDeleteCmd = &cobra.Command{
 	Use:   "delete CATEGORY_TOKEN [GROUP_TOKEN]",
 	Short: "Delete a category",
+	Long:  guardedDeleteHelp,
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -125,7 +126,7 @@ var categoryDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/categories/"+args[0])
+		data, err := api.DeleteRevision(cmd.Context(), "/groups/"+group+"/categories/"+args[0], lockVersion)
 		if err != nil {
 			return err
 		}
@@ -133,14 +134,8 @@ var categoryDeleteCmd = &cobra.Command{
 	},
 }
 
-func categoryCommandBody() (map[string]any, error) {
-	if categoryBodyFile != "" {
-		return parseObjectFile(categoryBodyFile)
-	}
-	return parseObject(categoryBody)
-}
-
 func init() {
+	addLockVersionFlag(categoryDeleteCmd)
 	rootCmd.AddCommand(categoryCmd)
 	categoryCmd.AddCommand(categoryListCmd, categoryCreateCmd, categoryUpdateCmd, categoryDeleteCmd, categoryExampleCmd)
 	categoryExampleCmd.AddCommand(categoryExampleCreateCmd, categoryExampleUpdateCmd)
