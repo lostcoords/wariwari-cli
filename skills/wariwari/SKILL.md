@@ -46,7 +46,6 @@ inner objects by participant token. Enum *values* stay snake_case
 
 ```bash
 wariwari setup
-wariwari setup claude
 wariwari doctor
 wariwari auth status
 ```

@@ -26,39 +26,44 @@ var skillCmd = &cobra.Command{
 
 var skillInstallCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Install the WariWari agent skill",
+	Short: "Install the WariWari agent skill for Claude Code, Codex and other agents",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		agentsPath, err := installSkill()
-		if err != nil {
-			return err
+		paths := []string{}
+		for _, dir := range skillDirs() {
+			path, err := writeEmbeddedSkill(dir)
+			if err != nil {
+				return err
+			}
+			paths = append(paths, path)
 		}
-		codexPath, err := installCodexSkill()
-		if err != nil {
-			return err
-		}
-		return printOK(map[string]any{
-			"skill_path": agentsPath,
-			"codex_path": codexPath,
-		}, "WariWari skill installed")
+		return printOK(map[string]any{"paths": paths}, "WariWari skill installed")
 	},
 }
 
-func installSkill() (string, error) {
+// skillDirs lists where agents look for user skills: the shared ~/.agents
+// directory, Claude Code and Codex.
+func skillDirs() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		home = "."
 	}
-	return writeEmbeddedSkill(filepath.Join(home, ".agents", "skills", "wariwari"))
-}
-
-func installCodexSkill() (string, error) {
-	return writeEmbeddedSkill(codexSkillDir())
+	return []string{
+		filepath.Join(home, ".agents", "skills", "wariwari"),
+		filepath.Join(home, ".claude", "skills", "wariwari"),
+		codexSkillDir(),
+	}
 }
 
 func writeEmbeddedSkill(dir string) (string, error) {
 	data, err := skills.FS.ReadFile("wariwari/SKILL.md")
 	if err != nil {
 		return "", err
+	}
+	// Replace an older symlinked install with a real directory.
+	if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(dir); err != nil {
+			return "", err
+		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -68,45 +73,6 @@ func writeEmbeddedSkill(dir string) (string, error) {
 		return "", err
 	}
 	return path, nil
-}
-
-func linkSkillToClaude() (string, error) {
-	skillPath, err := installSkill()
-	if err != nil {
-		return "", err
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
-	claudeDir := filepath.Join(home, ".claude", "skills")
-	claudeSkillDir := filepath.Join(claudeDir, "wariwari")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
-		return "", err
-	}
-
-	_ = os.Remove(claudeSkillDir)
-	target := filepath.Join("..", "..", ".agents", "skills", "wariwari")
-	if err := os.Symlink(target, claudeSkillDir); err != nil {
-		if err := os.MkdirAll(claudeSkillDir, 0o755); err != nil {
-			return "", err
-		}
-		data, readErr := os.ReadFile(skillPath)
-		if readErr != nil {
-			return "", readErr
-		}
-		if writeErr := os.WriteFile(filepath.Join(claudeSkillDir, skillFilename), data, 0o644); writeErr != nil {
-			return "", writeErr
-		}
-	}
-
-	return claudeSkillDir, nil
-}
-
-func codexSkillPath() string {
-	return filepath.Join(codexSkillDir(), skillFilename)
 }
 
 func codexSkillDir() string {

@@ -1,11 +1,13 @@
 package commands
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/lostcoords/wariwari-cli/internal/config"
 	"github.com/lostcoords/wariwari-cli/skills"
 )
 
@@ -66,29 +68,35 @@ func TestEmbeddedSkillCommandsExist(t *testing.T) {
 	}
 }
 
-func TestInstallSkillAlsoInstallsCodexSkill(t *testing.T) {
+func TestSkillInstallWritesEveryAgentDirectory(t *testing.T) {
 	home := t.TempDir()
 	codexHome := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", codexHome)
 
-	agentsPath, err := installSkill()
-	if err != nil {
-		t.Fatalf("installSkill() error = %v", err)
+	// An older `setup claude` left ~/.claude/skills/wariwari as a symlink.
+	claudeDir := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	codexPath, err := installCodexSkill()
-	if err != nil {
-		t.Fatalf("installCodexSkill() error = %v", err)
+	if err := os.Symlink(t.TempDir(), filepath.Join(claudeDir, "wariwari")); err != nil {
+		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(agentsPath); err != nil {
-		t.Fatalf("agents skill missing: %v", err)
+	if _, _, _, err := runRootCommand(t, &config.Config{Token: "wari_test"}, http.NotFound, "skill", "install"); err != nil {
+		t.Fatalf("skill install: %v", err)
 	}
-	wantCodexPath := filepath.Join(codexHome, "skills", "wariwari", "SKILL.md")
-	if codexPath != wantCodexPath {
-		t.Fatalf("codexPath = %q, want %q", codexPath, wantCodexPath)
+
+	for _, path := range []string{
+		filepath.Join(home, ".agents", "skills", "wariwari", "SKILL.md"),
+		filepath.Join(home, ".claude", "skills", "wariwari", "SKILL.md"),
+		filepath.Join(codexHome, "skills", "wariwari", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("skill missing at %s: %v", path, err)
+		}
 	}
-	if _, err := os.Stat(codexPath); err != nil {
-		t.Fatalf("codex skill missing: %v", err)
+	if info, _ := os.Lstat(filepath.Join(claudeDir, "wariwari")); info.Mode()&os.ModeSymlink != 0 {
+		t.Error("Claude skill directory is still a symlink")
 	}
 }

@@ -1,6 +1,6 @@
 # WariWari CLI
 
-`wariwari` is a command-line interface for WariWari. It follows the same shape as Fizzy CLI: token authentication, named profiles, JSON envelopes, breadcrumbs for next commands, an embedded agent skill, and Claude plugin metadata.
+`wariwari` is a command-line interface for WariWari. It follows the same shape as Fizzy CLI: token authentication, named profiles, JSON envelopes, breadcrumbs for next commands, and an embedded agent skill.
 
 ## Quick Start
 
@@ -271,12 +271,11 @@ including `current` on a `409` and `retryAfter` on a `429`
 ```bash
 wariwari skill
 wariwari skill install
-wariwari setup claude
 ```
 
-The embedded skill installs to `~/.agents/skills/wariwari/SKILL.md`.
-`wariwari skill install` also installs the skill to the Codex skill directory.
-`wariwari setup claude` also links it into `~/.claude/skills/wariwari`.
+`wariwari skill` prints the embedded skill. `wariwari skill install` writes it to
+`~/.agents/skills/wariwari`, `~/.claude/skills/wariwari` (Claude Code) and
+`$CODEX_HOME/skills/wariwari` (Codex, default `~/.codex`).
 `wariwari upgrade` refreshes an installed skill along with the binary.
 
 Example payloads:

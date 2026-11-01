@@ -15,8 +15,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Check plugin.json matches the tag
-        run: test "v$(jq -r .version .claude-plugin/plugin.json)" = "$GITHUB_REF_NAME"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

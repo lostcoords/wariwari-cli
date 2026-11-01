@@ -233,10 +233,10 @@ func isHomebrew(exe string) bool {
 // `wariwari skill install` has put it somewhere before.
 func refreshInstalledSkill(exe string) bool {
 	installed := false
-	if home, err := os.UserHomeDir(); err == nil {
-		installed = fileExists(filepath.Join(home, ".agents", "skills", "wariwari", skillFilename))
+	for _, dir := range skillDirs() {
+		installed = installed || fileExists(filepath.Join(dir, skillFilename))
 	}
-	if !installed && !fileExists(codexSkillPath()) {
+	if !installed {
 		return false
 	}
 	refresh := exec.Command(exe, "skill", "install", "--quiet")

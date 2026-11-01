@@ -2,8 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"os/exec"
-	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/lostcoords/wariwari-cli/internal/config"
@@ -12,6 +10,7 @@ import (
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
+	Args:  cobra.NoArgs,
 	Short: "Interactive setup wizard",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if agent || jsonOutput || quiet {
@@ -101,42 +100,4 @@ var setupCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(setupCmd)
-	setupCmd.AddCommand(setupClaudeCmd)
-}
-
-var setupClaudeCmd = &cobra.Command{
-	Use:   "claude",
-	Short: "Install the WariWari skill for Claude Code",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		skillPath, err := installSkill()
-		if err != nil {
-			return err
-		}
-		claudePath, err := linkSkillToClaude()
-		if err != nil {
-			return err
-		}
-
-		result := map[string]any{
-			"skill_path":        skillPath,
-			"claude_skill_path": claudePath,
-			"plugin_path":       ".claude-plugin",
-		}
-
-		if claude, err := exec.LookPath("claude"); err == nil {
-			installCmd := exec.CommandContext(cmd.Context(), claude, "plugin", "install", "./.claude-plugin")
-			output, runErr := installCmd.CombinedOutput()
-			result["plugin_command"] = "claude plugin install ./.claude-plugin"
-			if runErr != nil {
-				result["plugin_installed"] = false
-				result["plugin_error"] = strings.TrimSpace(string(output))
-			} else {
-				result["plugin_installed"] = true
-			}
-		} else {
-			result["notice"] = "Claude Code binary not found on PATH; skill link was still installed."
-		}
-
-		return printOK(result, "Claude Code linkage installed")
-	},
 }
