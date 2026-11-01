@@ -23,8 +23,10 @@ curl -fsSL https://wariwari.jp/install.sh | sh
 Pin a release with `WARIWARI_VERSION`:
 
 ```bash
-curl -fsSL https://wariwari.jp/install.sh | WARIWARI_VERSION=v0.1.0 sh
+curl -fsSL https://wariwari.jp/install.sh | WARIWARI_VERSION=v0.2.0 sh
 ```
+
+`WARIWARI_VERSION=nightly` installs the latest build of `main`.
 
 The script checks the archive against the release's `checksums.txt` and prints
 a `PATH` hint if `~/.local/bin` is not on it. `WARIWARI_BIN_DIR` installs
@@ -47,6 +49,7 @@ go install github.com/lostcoords/wariwari-cli/cmd/wariwari@latest
 ```bash
 wariwari upgrade --check     # only report whether an update exists
 wariwari upgrade             # install the latest release
+wariwari upgrade --version nightly   # the latest build of main
 wariwari upgrade --version v0.1.0
 ```
 

@@ -106,6 +106,9 @@ func upgradeReleaseURL(pinned string) string {
 		return strings.TrimRight(override, "/")
 	}
 	if pinned != "" {
+		if pinned == "nightly" {
+			return releasesURL + "/download/nightly"
+		}
 		return releasesURL + "/download/v" + strings.TrimPrefix(pinned, "v")
 	}
 	return releasesURL + "/latest/download"
@@ -256,6 +259,6 @@ func fileExists(path string) bool {
 
 func init() {
 	rootCmd.AddCommand(upgradeCmd)
-	upgradeCmd.Flags().StringVar(&upgradeVersion, "version", "", "Install this release, e.g. v0.1.0, instead of the latest")
+	upgradeCmd.Flags().StringVar(&upgradeVersion, "version", "", "Install this release, e.g. v0.2.0 or nightly, instead of the latest")
 	upgradeCmd.Flags().BoolVar(&upgradeCheck, "check", false, "Only report whether an update exists")
 }

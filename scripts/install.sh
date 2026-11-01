@@ -3,7 +3,8 @@
 # Served at https://wariwari.jp/install.sh from github.com/lostcoords/wariwari-cli.
 #
 #   curl -fsSL https://wariwari.jp/install.sh | sh
-#   curl -fsSL https://wariwari.jp/install.sh | WARIWARI_VERSION=v0.1.0 sh
+#   curl -fsSL https://wariwari.jp/install.sh | WARIWARI_VERSION=v0.2.0 sh
+#   curl -fsSL https://wariwari.jp/install.sh | WARIWARI_VERSION=nightly sh
 #
 # WARIWARI_BIN_DIR changes the install directory. WARIWARI_RELEASE_URL points at a directory
 # holding checksums.txt and the archives, for testing a local build.
@@ -61,6 +62,8 @@ main() {
 
   if [ -n "${WARIWARI_RELEASE_URL:-}" ]; then
     release=$WARIWARI_RELEASE_URL
+  elif [ "${WARIWARI_VERSION:-}" = nightly ]; then
+    release="https://github.com/$REPO/releases/download/nightly"
   elif [ -n "${WARIWARI_VERSION:-}" ]; then
     release="https://github.com/$REPO/releases/download/v${WARIWARI_VERSION#v}"
   else

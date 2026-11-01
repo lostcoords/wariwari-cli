@@ -1,0 +1,45 @@
+name: Nightly
+# Every main commit that passes Test replaces the `nightly` prerelease.
+# Tagged releases come from release.yml; releases/latest never points here.
+on:
+  workflow_run:
+    workflows: [Test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  nightly:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --snapshot --clean
+      - name: Replace the nightly prerelease
+        run: |
+          version=$(sed -n 's/.*  wariwari_\(.*\)_linux_amd64\.tar\.gz$/\1/p' dist/checksums.txt)
+          gh release delete nightly --yes --cleanup-tag || true
+          gh release create nightly dist/*.tar.gz dist/*.zip dist/checksums.txt \
+            --target "$SHA" --prerelease --latest=false --title "Nightly ($version)" \
+            --notes "wariwari $version, built from $SHA. Install: curl -fsSL https://wariwari.jp/install.sh | WARIWARI_VERSION=nightly sh — or wariwari upgrade --version nightly"

@@ -154,10 +154,16 @@ The version lives in the tag; GoReleaser stamps it into `main.version`, which
 `wariwari --version` prints. The skill ships inside the binary, so a release
 also ships the skill; `wariwari upgrade` reinstalls it.
 
-1. `git tag vX.Y.Z && git push origin vX.Y.Z`. The release workflow publishes
-   the archives and `checksums.txt` to GitHub Releases.
-2. `scripts/homebrew-formula.sh X.Y.Z > Formula/wariwari.rb` in a checkout of
-   `lostcoords/homebrew-tap`, then commit and push the tap.
+Releasing is one step: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+- `release.yml` publishes the archives and `checksums.txt` to GitHub Releases.
+- `lostcoords/homebrew-tap` runs `.github/workflows/wariwari.yml` every 15
+  minutes: it regenerates `Formula/wariwari.rb` from the latest release with
+  `scripts/homebrew-formula.sh` and commits any change. The tap pulls because
+  the org disables deploy keys, so the CLI can't push to it.
+- Tags with a `-` (`v0.3.0-rc1`) publish as prereleases and stay off Homebrew.
+- `nightly.yml` rebuilds the `nightly` prerelease from every main commit that
+  passes Test, versioned `<next patch>-nightly.<sha>`.
 
 `scripts/install.sh` (served at `https://wariwari.jp/install.sh`) and
 `wariwari upgrade` read the release's `checksums.txt`, so archive names must
