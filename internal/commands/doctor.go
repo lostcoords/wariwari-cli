@@ -52,14 +52,9 @@ var doctorCmd = &cobra.Command{
 }
 
 func liveAuthMessage(me any) string {
-	body, ok := me.(map[string]any)
-	if !ok {
-		return "Authenticated"
-	}
-	for _, key := range []string{"emailAddress", "name"} {
-		if value, ok := body[key].(string); ok && value != "" {
-			return fmt.Sprintf("Authenticated as %s", value)
-		}
+	body, _ := me.(map[string]any)
+	if user := userLabel(body); user != "" {
+		return fmt.Sprintf("Authenticated as %s", user)
 	}
 	return "Authenticated"
 }

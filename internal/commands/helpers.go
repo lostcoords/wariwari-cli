@@ -41,6 +41,15 @@ func addLockVersionFlag(cmd *cobra.Command) {
 	_ = cmd.MarkFlagRequired("lock-version")
 }
 
+// decodeInto converts a decoded JSON value into a typed struct.
+func decodeInto(data any, target any) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, target)
+}
+
 // bodyFrom reads a command's JSON body from --data-file, else --data.
 func bodyFrom(raw, path string) (map[string]any, error) {
 	if path != "" {

@@ -27,6 +27,7 @@ func runRootCommand(t *testing.T, cfgValue *config.Config, handler http.HandlerF
 	var records []requestRecord
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		records = append(records, requestRecord{
 			Method: r.Method,
 			Path:   r.URL.RequestURI(),
@@ -120,6 +121,7 @@ func resetCommandGlobals() {
 	invitationExpiresIn = ""
 	upgradeVersion = ""
 	upgradeCheck = false
+	authNoBrowser = false
 	resetFlagState(rootCmd)
 }
 
