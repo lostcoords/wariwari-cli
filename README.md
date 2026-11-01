@@ -6,7 +6,7 @@
 
 ```bash
 curl -fsSL https://wariwari.jp/install.sh | sh
-wariwari auth login wari_xxxxxxxx
+wariwari auth login
 wariwari doctor
 wariwari group list --json
 wariwari skill install
@@ -60,11 +60,24 @@ binary.
 
 ## Authentication
 
-Create an API key on the WariWari web account page (Account → API keys) — there
-is no API route to mint one. The key is shown once; save it with:
+Sign in through the browser:
+
+```bash
+wariwari auth login
+```
+
+The CLI prints a one-time code (like `BCDF-GHJK`), opens the WariWari approval
+page, and waits until you approve it there. Pass `--no-browser` to print the URL
+instead, for example over SSH. Approving creates an API key for this machine,
+listed under Account → API keys, and saves it to the active profile.
+
+Someone has to approve that login, so scripts, CI and agents without a person at
+hand should use an API key instead. Create one under Account → API keys (it is
+shown once), then either save it or pass it in the environment:
 
 ```bash
 wariwari auth login wari_xxxxxxxx
+WARIWARI_TOKEN=wari_xxxxxxxx wariwari group list
 ```
 
 A developer key can read and edit existing groups, including creating

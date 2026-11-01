@@ -16,6 +16,8 @@ wariwari-cli/
 ## API
 
 The CLI talks to WariWari's `/v1` JSON API with `Authorization: Bearer <token>`.
+The token is a developer API key (`wari_…`). `auth login TOKEN` saves one, and
+`auth login` with no argument gets one through the browser (below).
 The authoritative contract is the OpenAPI 3.1 bundle in the server repo
 (`openapi/dist/wariwari.bundled.yaml`) and its prose spec (`docs/specs/api.md`).
 Check a route there before adding or changing one here.
@@ -39,6 +41,7 @@ Two carve-outs:
 
 | Command                      | Route                                                         |
 | ---------------------------- | ------------------------------------------------------------- |
+| `auth login` (no token)      | `POST /v1/cli_authorizations`, then poll `…/token` (no auth)  |
 | `account show` / `me`        | `GET /v1/account`                                             |
 | `account update`             | `PATCH /v1/account` (flat body, no `user` wrapper)            |
 | `search`                     | `GET /v1/search` (`q`)                                        |
@@ -98,6 +101,21 @@ Do not reintroduce these — the API has no such surface:
 - `/v1/api_keys` (any verb) — API-key management is deliberately web-only. The
   `token` command exists only to say so.
 - `GET /v1/me` — removed; `GET /v1/account` returns the same user payload.
+
+### Browser login
+
+`auth login` without a token runs the RFC 8628 device authorization grant in
+`internal/commands/browser_login.go`. Both requests are unauthenticated, even
+when a token is configured. `POST /v1/cli_authorizations` with `{clientName}`
+(the hostname, at most 80 characters) returns `deviceCode`, `userCode`,
+`verificationUriComplete`, `expiresIn` and `interval`. The CLI then polls
+`POST /v1/cli_authorizations/token` with `{deviceCode}` every `interval`
+seconds. The poll returns 200 `{token, user}` once approved. A 400 problem
+`code` means: `AUTHORIZATION_PENDING`, keep polling; `SLOW_DOWN`, add 5s to the
+interval for good; `ACCESS_DENIED` or `EXPIRED_TOKEN`, stop. Anything else is
+fatal, and so is passing `expiresIn`. The token is saved through the same
+`saveLogin` path as `auth login TOKEN`. Prompts go to stderr, and stdout carries
+only the JSON envelope.
 
 ### Session-only routes
 

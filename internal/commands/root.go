@@ -100,7 +100,7 @@ func Execute() {
 
 func requireAuth() error {
 	if cfg.Token == "" {
-		return fmt.Errorf("no API token configured. Run `wariwari auth login TOKEN` or set WARIWARI_TOKEN")
+		return fmt.Errorf("no API token configured. Run `wariwari auth login` or set WARIWARI_TOKEN")
 	}
 	return nil
 }

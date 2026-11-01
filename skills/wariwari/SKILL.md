@@ -50,8 +50,12 @@ wariwari doctor
 wariwari auth status
 ```
 
-API keys are created on the web account page (Account → API keys) — there is no
-API route to list or mint one. Save a key with `wariwari auth login TOKEN`.
+Authenticate with an API key: `wariwari auth login wari_...` saves one, or set
+`WARIWARI_TOKEN`. Keys are created on the web account page (Account → API keys);
+there is no API route to list or mint one. `wariwari auth login` with no
+argument runs a browser login instead: it prints a one-time code and waits for
+a person to approve it in their browser. Use it only when the user is at the
+terminal and asks for it; otherwise ask them for a key.
 Developer API keys can create participants, categories, transactions, and
 payments inside an existing editable group. Group creation remains
 session-credential only. Full access is currently enabled for every account and
@@ -318,7 +322,7 @@ Failures are RFC 9457 Problem Details. Switch on `code`, show `detail`:
 
 | Code                                              | Status | What to do                                          |
 | ------------------------------------------------- | ------ | --------------------------------------------------- |
-| `AUTH_CREDENTIALS_REQUIRED` / `AUTH_CREDENTIALS_INVALID` / `AUTH_CREDENTIALS_EXPIRED` | 401 | Run `wariwari auth login TOKEN`. |
+| `AUTH_CREDENTIALS_REQUIRED` / `AUTH_CREDENTIALS_INVALID` / `AUTH_CREDENTIALS_EXPIRED` | 401 | Ask for a key and run `wariwari auth login wari_...`. |
 | `ACCESS_DENIED`                                   | 403    | Session-only action (e.g. creating a group).        |
 | `INSUFFICIENT_PERMISSIONS`                        | 403    | No edit access, or an admin-only action.            |
 | `NOT_FOUND`                                       | 404    | Wrong token, or the record was deleted.             |

@@ -97,8 +97,8 @@ main() {
 
   path_hint
   echo
-  echo "Next: wariwari auth login wari_... (create a key under Account -> API keys),"
-  echo "then wariwari skill install to give your coding agent the WariWari skill."
+  echo "Next: wariwari auth login, then wariwari skill install to give your coding"
+  echo "agent the WariWari skill."
   echo "Upgrade later with: wariwari upgrade"
 }
 
