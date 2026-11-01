@@ -2,6 +2,8 @@ package commands
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 
 	"github.com/charmbracelet/huh"
 	"github.com/lostcoords/wariwari-cli/internal/config"
@@ -41,8 +43,29 @@ var setupCmd = &cobra.Command{
 			return nil
 		}
 
-		if err := huh.NewInput().
-			Title("API token").
+		signIn := "browser"
+		if err := huh.NewSelect[string]().
+			Title("Sign in").
+			Options(
+				huh.NewOption("Sign in with the browser (recommended)", "browser"),
+				huh.NewOption("Paste an API key", "key"),
+			).
+			Value(&signIn).
+			Run(); err != nil {
+			return nil
+		}
+
+		if signIn == "browser" {
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+			login, err := browserLogin(ctx, apiURL, canOpenBrowser(false))
+			stop()
+			if err != nil {
+				return err
+			}
+			token = login.Token
+			fmt.Fprintf(errOut, "Logged in as %s.\n", userLabel(login.User))
+		} else if err := huh.NewInput().
+			Title("API key").
 			Description("Create one from Account -> API keys in WariWari.").
 			EchoMode(huh.EchoModePassword).
 			Value(&token).
