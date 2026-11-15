@@ -348,8 +348,9 @@ paths:
       x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
       summary: Update a group
       description: |
-        Updates group metadata. Requires the latest `lockVersion`. `currency`
-        can only be changed before the group has transactions.
+        Updates group metadata. Requires the latest `lockVersion`. Changing
+        `currency` rebases existing transactions onto it in the background,
+        which bumps their `lockVersion`.
       parameters:
         - $ref: '#/components/parameters/MutationOperationId'
         - $ref: '#/components/parameters/RecordedAt'
