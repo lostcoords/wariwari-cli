@@ -1,0 +1,5145 @@
+openapi: 3.1.0
+info:
+  title: wariwari API
+  version: 1.2.0
+  x-logo:
+    url: '%LOGO_URL%'
+    altText: wariwari
+    href: https://wariwari.jp/
+  description: |
+    Create and sync wariwari groups, participants, categories,
+    transactions, net balances, and settlement suggestions.
+
+    Send `Authorization: Bearer <api_key>` on every request unless an
+    operation says otherwise.
+
+    Every response includes `X-Request-Id`. Rate-limited responses return
+    `429` with `RATE_LIMIT_EXCEEDED` and `Retry-After` (seconds); wait that
+    long before retrying.
+
+    Rate limits:
+    - 240 requests a minute per IP address for anonymous requests and
+      developer API keys.
+    - 60 requests a minute per developer API key.
+    - 600 requests a minute per first-party session, in place of the IP limit,
+      so an app can flush writes it queued offline.
+    - 1,000 changes a day per group, shared by everyone who edits it. Only
+      writes that succeed count: replays of an `Idempotency-Key`, conflicts,
+      and rejected requests do not.
+
+    `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` describe
+    the per-minute bucket the request was counted against.
+
+    Full access is currently enabled for every account and group, so developer
+    API keys have no monthly usage quota. Short-term per-IP and per-credential
+    rate limits still apply. When quotas are on, a metered key's responses
+    carry `X-Quota-Limit`, `X-Quota-Remaining`, and `X-Quota-Reset`, and an
+    exhausted quota returns `429` with `QUOTA_EXCEEDED`.
+
+    Updates use optimistic locking. Send the latest `lockVersion` from the
+    resource you are updating. Stale versions return `409 CONFLICT` with the
+    current server state. Create requests do not include `lockVersion`.
+
+    Group writes that declare the `Idempotency-Key` header accept an
+    operation UUID. Invitation, notification-settings, import, and
+    participant-unlink writes don't take one. The authorized user-scoped
+    receipt stores the outcome atomically with the write; an identical retry
+    returns that outcome without repeating side effects. Reusing an ID with a
+    different method, path, or body returns 409. Receipts are retained for 90
+    days; older ambiguous retries require reconciliation. Writes queued
+    offline can also send `Recorded-At` with the time the change was made.
+servers:
+  - url: https://api.wariwari.jp
+    description: Production
+  - url: https://api.wariwari.localhost
+    description: Local
+security:
+  - bearerAuth: []
+tags:
+  - name: groups
+    x-displayName: Groups
+    description: Groups for splitting shared costs across participants.
+  - name: participants
+    x-displayName: Participants
+    description: People in a group.
+  - name: categories
+    x-displayName: Categories
+    description: Labels for group transactions.
+  - name: transactions
+    x-displayName: Transactions
+    description: Group expenses and settlement payments.
+  - name: payments
+    x-displayName: Payments
+    description: Settlements recorded between two participants.
+  - name: invitations
+    x-displayName: Invitations & Membership
+    description: Invite links for private groups and joining public groups.
+  - name: access_requests
+    x-displayName: Access Requests
+    description: Asking to join a private group, and admins approving or declining.
+  - name: account
+    x-displayName: Account
+    description: Profile, security, and preferences for the signed-in user.
+  - name: feedback
+    x-displayName: Feedback
+    description: Messages to the wariwari team, with or without an account.
+paths:
+  /v1/cli_authorizations:
+    post:
+      tags:
+        - session
+      operationId: startCliAuthorization
+      security: []
+      summary: Start a browser sign-in for a terminal
+      description: |
+        Device authorization request (RFC 8628 §3.1). Returns a `deviceCode`
+        for the CLI to keep and a short `userCode` for the person to enter at
+        `verificationUri`, where they approve or deny the request while signed
+        in. Poll `POST /v1/cli_authorizations/token` with the `deviceCode`
+        every `interval` seconds until it answers or `expiresIn` runs out.
+        No bearer token is required. Limited to 10 requests an hour per IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliAuthorizationCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CliAuthorization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/cli_authorizations/token:
+    post:
+      tags:
+        - session
+      operationId: claimCliAuthorization
+      security: []
+      summary: Poll for the CLI API key
+      description: |
+        Device access token request (RFC 8628 §3.4). Once the person approves,
+        the first poll mints a developer API key named "CLI on <clientName>"
+        and returns it with the user; it is never shown again. Until then the
+        poll answers `400` with `AUTHORIZATION_PENDING`, `SLOW_DOWN` when it
+        came sooner than `interval` seconds after the previous one (add 5
+        seconds to the interval), or `ACCESS_DENIED` if they denied it.
+        `EXPIRED_TOKEN` covers an expired, already claimed, or unknown device
+        code; start a new sign-in. No bearer token is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliAuthorizationTokenRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CliAuthorizationToken'
+        '400':
+          description: The request isn't approved yet, was denied, or can no longer be claimed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error400CliAuthorization'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/search:
+    get:
+      tags:
+        - groups
+      operationId: listSearchResults
+      x-wariwari-unpaginated-ok: Capped at 6 groups, 6 people and 8 expenses.
+      summary: Search groups, people and expenses
+      description: |
+        The search behind the web navbar, across every group the caller belongs
+        to. Matches group names, member names, expense descriptions and
+        categories; a query that is just an amount (`7000`, `¥7,000`, `12.50`) or
+        an ISO date (`2026-05-22`) also matches expenses with that amount or date.
+        A blank query returns the caller's most recently active groups.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups:
+    get:
+      tags:
+        - groups
+      operationId: listGroups
+      x-wariwari-paginated: true
+      summary: List groups
+      description: |
+        Returns groups where the authenticated user is a linked participant.
+      parameters:
+        - name: archived
+          in: query
+          required: false
+          description: When true, lists the groups the user has archived instead of their active set.
+          schema:
+            type: boolean
+        - name: take
+          in: query
+          required: false
+          description: Number of groups to return. Defaults to 50; maximum 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor from the previous response.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: createGroup
+      x-wariwari-heavy-ok: Create returns the initial snapshot so clients receive server-created categories and participant lock versions.
+      summary: Create a group
+      description: |
+        Creates a group anonymously with a client token, or as the signed-in
+        account with any credential; the account is linked to the creator
+        participant as an admin. Developer API keys and OAuth grants may create
+        20 groups an hour per account. The optional client-generated group token makes
+        creation replay-safe. Reusing a token under another operation conflicts.
+        `Idempotency-Key` also makes an identical
+        retry safe for 90 days; reusing it with a different body returns
+        `409 IDEMPOTENCY_KEY_IN_USE`.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: showGroup
+      x-wariwari-heavy-ok: Group read endpoint; intentionally returns the complete group render state.
+      summary: Retrieve a group
+      description: |
+        Returns a full group snapshot: metadata, categories, participants,
+        transactions, net balances, suggested payments, and spending totals.
+        Public groups are readable by anyone with the link, without an account.
+        Private groups require linked membership. Invalid supplied credentials
+        are rejected even for public groups.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: updateGroup
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Update a group
+      description: |
+        Updates group metadata. Requires the latest `lockVersion`. `currency`
+        can only be changed before the group has transactions.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: deleteGroup
+      summary: Delete a group
+      description: |
+        Soft-deletes the group and clears the caller's archival flag for it.
+        Requires group edit access and the latest `lockVersion`. Returns 204.
+        Anonymous link holders may delete public editable groups. Deleting a group
+        that is already deleted returns 204 again without writing anything, whatever
+        the operation ID or `lockVersion`.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+        - $ref: '#/components/parameters/MutationExpectedRevision'
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/activity:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: listGroupActivity
+      x-wariwari-paginated: true
+      summary: List group activity
+      description: |
+        Returns transaction activity for the group, newest first.
+
+        History older than one month is omitted unless the group has extended
+        activity history (a premium sponsor, or full access while it is enabled).
+      parameters:
+        - name: take
+          in: query
+          required: false
+          description: Number of activity entries to return. Defaults to 50; maximum 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor from the previous response.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionActivityList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/categories:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - categories
+      operationId: createGroupCategory
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Create a group category
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      description: |
+        Creates a category and returns the refreshed group snapshot.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupCategoryCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/categories/{category_token}:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/GroupCategoryToken'
+    patch:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - categories
+      operationId: updateGroupCategory
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Update a group category
+      description: |
+        Updates an existing category and returns the refreshed group snapshot.
+        Requires the latest `lockVersion`.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupCategoryUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - categories
+      operationId: deleteGroupCategory
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Delete a group category
+      description: |
+        Deletes an unused category. The last category and categories used by
+        transactions cannot be deleted. Requires the latest `lockVersion` and
+        returns the refreshed group snapshot. Categories are removed outright, so
+        deleting a token the group no longer has succeeds with the snapshot.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+        - $ref: '#/components/parameters/MutationExpectedRevision'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/participants:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - participants
+      operationId: createParticipant
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Create a participant
+      description: |
+        Creates a participant and returns the refreshed group snapshot. Session
+        credentials and developer API keys are both supported. Reusing a client
+        token returns `409 DUPLICATE_TOKEN`; use `Idempotency-Key` to retry a
+        create safely.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParticipantCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/participants/{participant_token}:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/ParticipantToken'
+    patch:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - participants
+      operationId: updateParticipant
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Update a participant
+      description: |
+        Updates an existing participant and returns the refreshed group snapshot.
+        Requires the latest `lockVersion`.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParticipantUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - participants
+      operationId: deleteParticipant
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Delete a participant
+      description: |
+        Soft-deletes a participant and returns the refreshed group snapshot.
+        Requires the latest `lockVersion`. Deleting a participant that is already
+        deleted (or merged away) returns the snapshot without writing anything,
+        whatever the operation ID or revision.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+        - $ref: '#/components/parameters/MutationExpectedRevision'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/transactions:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - transactions
+      operationId: listTransactions
+      x-wariwari-paginated: true
+      summary: List transactions
+      description: |
+        Returns the group's transactions, newest first (by date, then time of
+        day, with unknown times after known times on the same date). Deleted
+        transactions are omitted. Filters are optional and combinable; a `category`
+        or `participant` token that matches nothing returns an empty page.
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: Only transactions dated on or after this date.
+          schema:
+            type: string
+            format: date
+            example: '2026-01-01'
+        - name: to
+          in: query
+          required: false
+          description: Only transactions dated on or before this date.
+          schema:
+            type: string
+            format: date
+            example: '2026-01-31'
+        - name: category
+          in: query
+          required: false
+          description: Only transactions filed under this group category.
+          schema:
+            $ref: '#/components/schemas/Token'
+        - name: participant
+          in: query
+          required: false
+          description: Only transactions this participant paid for or owes a share of.
+          schema:
+            $ref: '#/components/schemas/Token'
+        - name: take
+          in: query
+          required: false
+          description: Number of transactions to return. Defaults to 50; maximum 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor from the previous response.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - transactions
+      operationId: createTransaction
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Create a transaction
+      description: |
+        Creates an expense or settlement payment and returns the refreshed group
+        snapshot. Session credentials and developer API keys are both supported.
+        Reusing a client token returns `409 DUPLICATE_TOKEN`; use
+        `Idempotency-Key` to retry a create safely.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/transactions/{transaction_token}:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/TransactionToken'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - transactions
+      operationId: showTransaction
+      summary: Get a transaction
+      description: |
+        Returns a single transaction, in the same shape it takes inside the
+        group snapshot. Deleted transactions return `404`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - transactions
+      operationId: updateTransaction
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Update a transaction
+      description: |
+        Updates an existing transaction and returns the refreshed group snapshot.
+        Requires the latest `lockVersion`. Sending `splits` replaces all existing
+        splits. A deleted transaction returns `CONFLICT` with `current` carrying
+        its `deletedAt`, even when `lockVersion` matches.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - transactions
+      operationId: deleteTransaction
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Delete a transaction
+      description: |
+        Soft-deletes a transaction and returns the refreshed group snapshot.
+        Requires the latest `lockVersion`. Deleting a transaction that is already
+        deleted returns the snapshot without writing anything, whatever the
+        operation ID or revision.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+        - $ref: '#/components/parameters/MutationExpectedRevision'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/transactions/{transaction_token}/activity:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/TransactionToken'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - transactions
+      operationId: listTransactionActivity
+      x-wariwari-paginated: true
+      summary: List transaction activity
+      description: |
+        Returns transaction activity, newest first.
+
+        History older than one month is omitted unless the group has extended
+        activity history (a premium sponsor, or full access while it is enabled).
+      parameters:
+        - name: take
+          in: query
+          required: false
+          description: Number of activity entries to return. Defaults to 50; maximum 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor from the previous response.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionActivityList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/transaction_bulk_edit:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - transactions
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: bulkEditTransactions
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Bulk-edit transactions
+      description: Re-assigns payer/category/split/date across many transactions at once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkEditInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - transactions
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: bulkDeleteTransactions
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Bulk-delete transactions
+      description: Soft-deletes many transactions at once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkEditDelete'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/settings:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: showGroupSettings
+      summary: Show group settings
+      description: Returns editable settings, categories (with a `used` flag), and participant roles.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: updateGroupSettings
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Update group settings
+      description: Updates currency/visibility, category edits, and participant roles. Requires the latest `lockVersion`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupSettingsUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/notification_settings:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      tags:
+        - groups
+      operationId: showGroupNotificationSettings
+      summary: Show the caller's notification settings for a group
+      description: Whether the signed-in member has muted push notifications for this group.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupNotificationSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - groups
+      operationId: updateGroupNotificationSettings
+      summary: Mute or unmute push notifications for a group
+      description: Sets whether the signed-in member receives push notifications for this group.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupNotificationSettings'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupNotificationSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/archival:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      tags:
+        - groups
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: archiveGroup
+      summary: Archive a group
+      description: Archives the group for the current user. Idempotent.
+      responses:
+        '204':
+          description: Archived
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - groups
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: unarchiveGroup
+      summary: Unarchive a group
+      description: Removes the group from the current user's archive.
+      responses:
+        '204':
+          description: Unarchived
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/dismissal:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      tags:
+        - groups
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: dismissGroup
+      summary: Dismiss a group
+      description: Removes the group from the current user's active list — clears any archive record and unlinks their participant rows. The last admin of a private or view-only group gets 400 `VALIDATION_FAILED` and nothing changes.
+      responses:
+        '204':
+          description: Dismissed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/duplication:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      tags:
+        - groups
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: duplicateGroup
+      x-wariwari-heavy-ok: Returns the new group's snapshot.
+      summary: Duplicate a group
+      description: Copies the group's categories (and optionally members) into a new group and returns its snapshot.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                includeMembers:
+                  type: boolean
+                  description: Copy participants too. Defaults to true.
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/fx_rate:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: showGroupFxRate
+      summary: Convert a currency to the group currency
+      description: Returns the exchange rate from a source currency to the group currency.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Source currency (ISO-4217).
+          schema:
+            $ref: '#/components/schemas/Currency'
+        - name: date
+          in: query
+          required: false
+          description: |
+            Day the rate is for, usually the expense's date. Defaults to today.
+            Today and later dates get the latest published rate.
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxRate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/stats:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: showGroupStats
+      summary: Group spending statistics
+      description: Returns spending statistics in raw minor units for any viewable group.
+      parameters:
+        - name: dateRange
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/StatsDateRange'
+        - name: participant
+          in: query
+          required: false
+          description: Only expenses this participant paid for or owes a share of.
+          schema:
+            $ref: '#/components/schemas/Token'
+        - name: category
+          in: query
+          required: false
+          description: Only expenses filed under this group category.
+          schema:
+            $ref: '#/components/schemas/Token'
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: month
+          in: query
+          required: false
+          description: Filter to a single month, as `YYYY-MM`.
+          schema:
+            type: string
+            pattern: ^[0-9]{4}-[0-9]{2}$
+        - name: week
+          in: query
+          required: false
+          description: Filter to a Monday-start week containing the supplied ISO date.
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/csv_export:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - groups
+      operationId: showGroupCsvExport
+      summary: Export a group as CSV
+      description: |
+        Downloads every transaction in the group as a `wariwari.v1` CSV file,
+        the same file the web app's export produces and the import endpoints
+        accept. Requires settings access to the group. The
+        `Content-Disposition` header names the file `<group-slug>-wariwari.csv`.
+      responses:
+        '200':
+          description: OK
+          headers:
+            Content-Disposition:
+              description: Attachment filename, e.g. `attachment; filename="okinawa-trip-wariwari.csv"`.
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/payments:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - payments
+      operationId: createPayment
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Record a payment
+      description: Records a settlement between two participants and returns the refreshed group snapshot.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/payments/{payment_token}:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/PaymentToken'
+    patch:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - payments
+      operationId: updatePayment
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Update a payment
+      description: |
+        Updates an existing payment. Requires the latest `lockVersion`. A deleted
+        payment returns `CONFLICT` with `current` carrying its `deletedAt`, even
+        when `lockVersion` matches.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/participants/{participant_token}/claim:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/ParticipantToken'
+    post:
+      tags:
+        - participants
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: claimParticipant
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Claim a participant
+      description: |
+        Links a guest participant to the current user. When the user is already
+        linked to another participant in the group, the guest is merged into that
+        participant. Retries with the same operation ID replay an
+        account-scoped receipt. Current group access is required before replay.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error409ParticipantClaim'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/participants/{participant_token}/merge:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/ParticipantToken'
+    post:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - participants
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+        - $ref: '#/components/parameters/MutationExpectedRevision'
+      operationId: mergeParticipant
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Merge a participant
+      description: |
+        Merges this participant (loser) into the winner identified by `into`. Every
+        transaction that named the loser gets a new `lockVersion`, so a queued edit
+        still naming the loser returns `CONFLICT` with the merged transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - into
+              properties:
+                into:
+                  allOf:
+                    - $ref: '#/components/schemas/Token'
+                  description: Winner participant token.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/participants/{participant_token}/link:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/ParticipantToken'
+    delete:
+      tags:
+        - participants
+      operationId: unlinkParticipant
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Unlink the current user from a participant
+      description: Unlinks the current user's participant. Blocked if it would leave a private group without an admin.
+      responses:
+        '200':
+          description: Unlinked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/participants/{participant_token}/position:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/ParticipantToken'
+    patch:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - participants
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+        - $ref: '#/components/parameters/MutationExpectedRevision'
+      operationId: moveParticipant
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Reorder a participant
+      description: |
+        Moves a participant to an absolute `position` or one step in a `direction`.
+        Positions are ordering metadata: reordering changes no participant's
+        `lockVersion`, so queued edits to the reordered participants still apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PositionMove'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/participants/{participant_token}/balance:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/ParticipantToken'
+    get:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - participants
+      operationId: showParticipantBalance
+      summary: Show a participant's balance ledger
+      description: |
+        Works out one participant's balance in the group currency, transaction
+        by transaction, for any viewable group. Entries reference transactions
+        by token; read their details from the group snapshot.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceLedger'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      tags:
+        - invitations
+      operationId: listInvitations
+      x-wariwari-unpaginated-ok: A group has a handful of open invitations; the share card shows all of them.
+      summary: List open invitations
+      description: |
+        Returns the group's invitations that are not used, revoked or expired,
+        newest first. Requires settings access to the group.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - invitations
+      operationId: createInvitation
+      summary: Create an invitation
+      description: Creates an invitation link for a view-only or private group and returns its `url`. Admin-only.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/invitations/{invitation_token}:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/InvitationToken'
+    delete:
+      tags:
+        - invitations
+      operationId: revokeInvitation
+      summary: Revoke an invitation
+      description: Revokes an outstanding invitation. Admin-only.
+      responses:
+        '204':
+          description: Revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/invitations/{invitation_token}/accept:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/InvitationToken'
+    post:
+      tags:
+        - invitations
+      operationId: acceptInvitation
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Accept an invitation
+      description: Accepts an invitation and links the current user to the group. Returns the group snapshot.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/membership:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      tags:
+        - invitations
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: joinGroup
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Join a public group
+      description: Adds the current user as a registered member of a public-editable group. Existing members receive a snapshot without another membership. An optional operation ID records an account-scoped receipt so a retry does not recreate a subsequently removed membership. Current group access and join permission are checked before replay; viewer access reflects the current request.
+      responses:
+        '200':
+          description: Already a member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '201':
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/access_request:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      tags:
+        - access_requests
+      operationId: showAccessRequest
+      summary: Show your access request
+      description: |
+        Returns where the signed-in user's request to join this group stands.
+        Works for a private group the user cannot open, and reveals nothing
+        about the group beyond its existence, so a client can show a "private
+        group, ask for access" screen. Groups the user can already open return
+        `viewable`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessRequestStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - access_requests
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: requestGroupAccess
+      summary: Ask to join a private group
+      description: |
+        Asks the group's admins to let the signed-in user in, and notifies them.
+        Idempotent: asking while a request is pending, or within 7 days of a
+        decline, changes nothing and returns the current status without
+        notifying again. Groups the user can already open return `viewable`.
+        Limited to 10 requests per user per hour.
+      responses:
+        '200':
+          description: Unchanged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessRequestStatus'
+        '201':
+          description: Asked; the admins were notified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessRequestStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/access_requests:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      tags:
+        - access_requests
+      operationId: listAccessRequests
+      x-wariwari-unpaginated-ok: Pending requests per group stay small; admins act on all of them at once.
+      summary: List pending access requests
+      description: Returns the group's pending access requests, oldest first. Admin-only.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessRequestList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/access_requests/{access_request_id}/approval:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/AccessRequestId'
+    post:
+      tags:
+        - access_requests
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: approveAccessRequest
+      x-wariwari-heavy-ok: Group writes return the refreshed canonical snapshot.
+      summary: Approve an access request
+      description: |
+        Adds the requester as an editor and notifies them. Admin-only. A
+        request that was already approved or declined returns 404.
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/access_requests/{access_request_id}/decline:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/AccessRequestId'
+    post:
+      tags:
+        - access_requests
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+        - $ref: '#/components/parameters/RecordedAt'
+      operationId: declineAccessRequest
+      summary: Decline an access request
+      description: |
+        Declines a pending request. Admin-only. The requester is not notified
+        and cannot ask again for 7 days. A request that was already approved
+        or declined returns 404.
+      responses:
+        '204':
+          description: Declined
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/account:
+    get:
+      tags:
+        - account
+      operationId: showAccount
+      summary: Show the account profile
+      description: Returns the authenticated user's full profile.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - account
+      operationId: updateAccount
+      summary: Update the account profile
+      description: |
+        Updates profile fields with JSON. Upload an avatar with a
+        `multipart/form-data` body holding only the `avatar` file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountUpdate'
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - avatar
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+                  description: jpeg/png/gif/webp, ≤5MB.
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/feedback:
+    post:
+      security:
+        - {}
+        - bearerAuth: []
+      tags:
+        - feedback
+      operationId: createFeedback
+      summary: Send feedback to the wariwari team
+      description: |
+        Delivers a message to the team. No bearer token is required. When the
+        caller is signed in, the message is linked to their account and
+        replies go to the account's email address, ignoring `email`. Limited
+        to 5 messages an hour per account or IP address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackCreate'
+      responses:
+        '202':
+          description: Accepted — the team has been notified.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Developer API key, prefix `wari_`, or a first-party session bearer
+        for native/web app operations. Mint developer keys at
+        `/account/api_keys` while signed in to the web app.
+  schemas:
+    CliAuthorizationCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - clientName
+      properties:
+        clientName:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: |
+            What the person sees when approving, and the API key's name
+            ("CLI on <clientName>", shortened to 50 characters). The CLI sends
+            the machine's hostname.
+          example: work-laptop
+    CliAuthorization:
+      type: object
+      additionalProperties: false
+      required:
+        - deviceCode
+        - userCode
+        - verificationUri
+        - verificationUriComplete
+        - expiresIn
+        - interval
+      properties:
+        deviceCode:
+          type: string
+          minLength: 1
+          description: Secret the CLI polls with. Keep it out of logs and the terminal.
+        userCode:
+          type: string
+          pattern: ^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$
+          description: Code to show the person, who compares it with the one on the web page.
+          example: BDFG-HJKL
+        verificationUri:
+          type: string
+          format: uri
+          description: Web page where the person enters `userCode`.
+          example: https://wariwari.jp/cli
+        verificationUriComplete:
+          type: string
+          format: uri
+          description: '`verificationUri` with the code filled in, to open in the browser.'
+          example: https://wariwari.jp/cli?code=BDFG-HJKL
+        expiresIn:
+          type: integer
+          minimum: 1
+          description: Seconds until `deviceCode` and `userCode` expire.
+          example: 600
+        interval:
+          type: integer
+          minimum: 1
+          description: Minimum seconds between token polls.
+          example: 5
+    ErrorBase:
+      type: object
+      description: |
+        Common API error envelope. Status-specific schemas narrow `status` and
+        `code` to the values returned by the API.
+      required:
+        - code
+        - title
+        - detail
+        - status
+      properties:
+        code:
+          type: string
+          minLength: 1
+          description: Stable machine-readable code in UPPER_SNAKE_CASE. Switch on this for programmatic handling.
+        title:
+          type: string
+          minLength: 1
+          description: Short human-readable summary. Stable across occurrences of the same problem.
+        detail:
+          type: string
+          minLength: 1
+          description: Human-readable explanation specific to this occurrence.
+        status:
+          type: integer
+          description: Mirrors the HTTP status code of the response.
+        type:
+          type: string
+          format: uri
+          minLength: 1
+          description: URI identifying the problem type.
+        instance:
+          type: string
+          minLength: 1
+          description: Request ID; useful for support correlation.
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional map of field names to validation messages.
+    Error400:
+      description: Bad Request — malformed input, invalid cursor, or validation failure.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 400
+            code:
+              type: string
+              enum:
+                - VALIDATION_FAILED
+                - INVALID_REQUEST
+                - UNSUPPORTED_GRANT_TYPE
+            errors:
+              type: object
+              description: Optional per-field validation messages.
+              additionalProperties:
+                type: string
+                minLength: 1
+    Error413:
+      description: JSON API request exceeds the 1 MiB body limit.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 413
+            code:
+              type: string
+              enum:
+                - PAYLOAD_TOO_LARGE
+    Error429:
+      description: |
+        Too Many Requests — the short-term request rate limit was exceeded.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 429
+            code:
+              type: string
+              enum:
+                - RATE_LIMIT_EXCEEDED
+                - QUOTA_EXCEEDED
+    Error500:
+      description: |
+        Internal Server Error — an unexpected server-side failure occurred.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 500
+            code:
+              type: string
+              enum:
+                - INTERNAL_SERVER_EXCEPTION
+    Error503:
+      description: A required service or operation is temporarily unavailable. Honor Retry-After when present.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 503
+            code:
+              type: string
+              enum:
+                - IDEMPOTENCY_IN_PROGRESS
+                - RATE_LIMIT_UNAVAILABLE
+                - RATE_UNAVAILABLE
+    CliAuthorizationTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - deviceCode
+      properties:
+        deviceCode:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The `deviceCode` from `POST /v1/cli_authorizations`.
+    Locale:
+      type: string
+      enum:
+        - en
+        - es
+        - ja
+      description: |
+        Two-letter language code for UI strings and email locale. Clients
+        should fall back to `en` for a value they don't recognise.
+    Currency:
+      type: string
+      description: ISO-4217 currency code (uppercase 3-letter alphabetic).
+      minLength: 3
+      maxLength: 3
+      pattern: ^[A-Z]{3}$
+      example: JPY
+    User:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - analyticsId
+        - emailAddress
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        analyticsId:
+          type: string
+          format: uuid
+          description: Stable opaque identifier used only to associate analytics events across Wariwari clients.
+        emailAddress:
+          type: string
+          format: email
+          minLength: 1
+        name:
+          type:
+            - string
+            - 'null'
+          maxLength: 120
+          description: |
+            Display name. `null` for users who haven't set one — the UI
+            falls back to the local part of `emailAddress`.
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+          description: |
+            Path to the variant of the uploaded avatar. `null` when no
+            avatar is attached. Always relative (`/rails/active_storage/…`).
+        locale:
+          oneOf:
+            - $ref: '#/components/schemas/Locale'
+            - type: 'null'
+          description: |
+            Preferred UI locale. `null` for users who haven't set one; the
+            cascade then falls back to host default → Accept-Language →
+            English.
+        preferredCurrency:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+          description: Default currency for new groups created by this user.
+        createdAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    CliAuthorizationToken:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - user
+      properties:
+        token:
+          type: string
+          pattern: ^wari_
+          description: |
+            Developer API key for `Authorization: Bearer <token>`. Shown once;
+            revoke it from the account page under API keys.
+        user:
+          $ref: '#/components/schemas/User'
+    Error400CliAuthorization:
+      description: |
+        Bad Request from a device token poll. The codes follow RFC 8628 §3.5:
+        keep polling on `AUTHORIZATION_PENDING`, wait 5 seconds longer on
+        `SLOW_DOWN`, and stop on `ACCESS_DENIED` or `EXPIRED_TOKEN`.
+        `VALIDATION_FAILED` means the body was malformed.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 400
+            code:
+              type: string
+              enum:
+                - AUTHORIZATION_PENDING
+                - SLOW_DOWN
+                - ACCESS_DENIED
+                - EXPIRED_TOKEN
+                - VALIDATION_FAILED
+            errors:
+              type: object
+              description: Optional per-field validation messages.
+              additionalProperties:
+                type: string
+                minLength: 1
+    GroupToken:
+      type: string
+      description: |
+        Group resource token. 16 characters of base58.
+      minLength: 16
+      maxLength: 16
+      pattern: ^[A-HJ-NP-Za-km-z1-9]{16}$
+      example: 7gKMjL9pPWsKaHQ4
+    GroupRef:
+      type: object
+      additionalProperties: false
+      description: Just enough of a group to name it and link to it.
+      required:
+        - token
+        - name
+        - icon
+        - currency
+      properties:
+        token:
+          $ref: '#/components/schemas/GroupToken'
+        name:
+          type: string
+        icon:
+          type: string
+        currency:
+          $ref: '#/components/schemas/Currency'
+    Token:
+      type: string
+      description: |
+        Resource token. 24 characters of base58 (`SecureRandom.base58(24)` —
+        the alphabet excludes the visually-confusable `0`, `O`, `I`, `l`).
+        Tokens are stable across edits. Most public resources receive a
+        server-generated token on creation; group creation may also accept
+        client-supplied participant tokens for offline/import flows.
+      minLength: 24
+      maxLength: 24
+      pattern: ^[A-HJ-NP-Za-km-z1-9]{24}$
+      example: 7gKMjL9pPWsKaHQ4AbwS5kVj
+    MembershipRole:
+      type: string
+      enum:
+        - read_only
+        - editor
+        - admin
+    ParticipantColor:
+      type:
+        - string
+        - 'null'
+      description: Avatar colour from the fixed palette, or `null` for the default.
+      enum:
+        - '#D4A574'
+        - '#6E7A4F'
+        - '#A94E3B'
+        - '#1F3A5F'
+        - '#8A6A3F'
+        - '#7A5D86'
+        - '#4F7F78'
+        - '#AD5C65'
+        - '#C2A64B'
+        - '#C47A55'
+        - '#5C6F8F'
+        - '#8D6B5A'
+        - null
+    PaymentNetwork:
+      type: string
+      description: Supported payment network the caller can be paid back through.
+      enum:
+        - paypay
+        - rakuten_pay
+        - d_barai
+        - merpay
+        - line_pay
+        - bizum
+        - revolut
+        - wise
+        - paypal
+        - venmo
+        - cash_app
+        - zelle
+        - bank_transfer
+        - suica
+        - other
+    Participant:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - name
+        - membershipRole
+        - avatarUrl
+        - paymentMethods
+        - lockVersion
+        - createdAt
+        - updatedAt
+      properties:
+        token:
+          $ref: '#/components/schemas/Token'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        membershipRole:
+          $ref: '#/components/schemas/MembershipRole'
+          description: Permission role for linked members. Guest participants default to editor.
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+          description: |
+            Path to the linked user's avatar variant. `null` when the participant
+            is anonymous or the linked user has no avatar.
+        color:
+          $ref: '#/components/schemas/ParticipantColor'
+        position:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          description: Stable display order inside the group.
+        paymentMethods:
+          type: array
+          description: |
+            The linked member's payment methods, in display order — the same set
+            the web group page renders. Empty for guests or members with none.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - network
+              - networkLabel
+              - identifier
+              - preferred
+              - supportsPaymentPrefill
+            properties:
+              network:
+                $ref: '#/components/schemas/PaymentNetwork'
+              networkLabel:
+                type: string
+              identifier:
+                type: string
+              preferred:
+                type: boolean
+              shareUrl:
+                type:
+                  - string
+                  - 'null'
+                format: uri
+              supportsPaymentPrefill:
+                type: boolean
+        lockVersion:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    TransactionKind:
+      type: string
+      enum:
+        - expense
+        - payment
+      description: |
+        `expense` is normal spending; `payment` is money sent from one
+        participant to another to settle balances.
+    SplitType:
+      type: string
+      description: |
+        How a transaction's amount is divided across participants.
+          • `equal` — equal shares across all listed participants.
+          • `percentage` — percentage shares (sum to 100, server normalizes
+            rounding cents).
+          • `shares` — weighted shares (e.g. 1, 2, 1 → 25/50/25 split).
+          • `amount` — exact per-participant amounts supplied by the client.
+      enum:
+        - equal
+        - percentage
+        - shares
+        - amount
+    Split:
+      type: object
+      additionalProperties: false
+      required:
+        - participantToken
+        - amountCents
+      properties:
+        participantToken:
+          $ref: '#/components/schemas/Token'
+        amountCents:
+          type: integer
+          minimum: 0
+        baseCents:
+          type: integer
+          minimum: 0
+          description: |
+            This participant's share in the transaction's balance currency, as the
+            server's balances count it. Present on group snapshots; omitted elsewhere.
+    Transaction:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - sortId
+        - kind
+        - lockVersion
+        - description
+        - category
+        - amountCents
+        - currency
+        - balanceCurrency
+        - amountBaseCents
+        - baseCurrency
+        - exchangeRate
+        - conversionPending
+        - splitType
+        - date
+        - timeOfDay
+        - paidByToken
+        - splits
+        - createdAt
+        - updatedAt
+      properties:
+        token:
+          $ref: '#/components/schemas/Token'
+        sortId:
+          type: integer
+          minimum: 1
+          description: Server-side transaction order tie-breaker for stable first paint/cache hydration.
+        kind:
+          $ref: '#/components/schemas/TransactionKind'
+        lockVersion:
+          type: integer
+          minimum: 0
+        description:
+          type: string
+          minLength: 1
+          maxLength: 120
+        category:
+          type: string
+          minLength: 1
+          maxLength: 40
+        categoryEmoji:
+          type: string
+          minLength: 1
+          maxLength: 32
+        groupCategoryToken:
+          oneOf:
+            - $ref: '#/components/schemas/Token'
+            - type: 'null'
+        amountCents:
+          type: integer
+          minimum: 1
+          description: Amount in the transaction's native currency (minor units).
+        currency:
+          $ref: '#/components/schemas/Currency'
+        balanceCurrency:
+          $ref: '#/components/schemas/Currency'
+          description: |
+            Currency bucket used for balances and suggested payments. Usually the
+            group base currency; when it matches `currency`, the transaction is
+            tracked in its original currency instead.
+        amountBaseCents:
+          type: integer
+          minimum: 0
+          description: |
+            Amount converted to the group's base currency at the rate
+            snapshotted when the transaction was saved. Recompute-safe: a later
+            FX-rate change does NOT retroactively shift this value.
+        baseCurrency:
+          $ref: '#/components/schemas/Currency'
+        exchangeRate:
+          type: string
+          pattern: ^\d+(\.\d+)?$
+          description: |
+            Decimal rate used to convert native → base, as a string to
+            avoid float drift. `"1.0"` when the transaction and group share a
+            currency.
+          example: '150.25'
+        exchangeRateProvisional:
+          type: boolean
+          description: |
+            `true` while `exchangeRate` is the latest published rate standing in for
+            one not yet published for `date` (today, a future date, or a day the
+            provider hasn't caught up on). Once that date's rate is out the server
+            converts again, which may change `amountBaseCents` and `exchangeRate`
+            without changing `lockVersion`.
+        conversionPending:
+          type: boolean
+          description: |
+            `true` while a foreign-currency transaction waits for an exchange rate
+            the provider could not supply when it was saved. Until then it balances
+            in its own currency (`balanceCurrency` equals `currency`); the server
+            retries in the background and moves it to the group currency when rates
+            return, without changing `lockVersion`. `false` for a transaction kept in
+            its own currency on purpose.
+        splitType:
+          $ref: '#/components/schemas/SplitType'
+        date:
+          type: string
+          format: date
+        timeOfDay:
+          type:
+            - string
+            - 'null'
+          pattern: ^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$
+          example: '19:30'
+          description: |
+            Local civil time of the transaction, optionally including seconds.
+            `null` when the time is genuinely unknown — an import whose source file
+            carried no time column. Reading it as midnight would be wrong: that is a
+            real time some transactions actually have.
+        paidByToken:
+          oneOf:
+            - $ref: '#/components/schemas/Token'
+            - type: 'null'
+          description: |
+            Token of the participant who paid. `null` when the payer was
+            removed and the transaction hasn't been reassigned yet.
+        splits:
+          type: array
+          items:
+            $ref: '#/components/schemas/Split'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    SearchResults:
+      type: object
+      additionalProperties: false
+      required:
+        - groups
+        - people
+        - transactions
+      properties:
+        groups:
+          type: array
+          maxItems: 6
+          items:
+            $ref: '#/components/schemas/GroupRef'
+        people:
+          type: array
+          maxItems: 6
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - group
+              - participant
+            properties:
+              group:
+                $ref: '#/components/schemas/GroupRef'
+              participant:
+                $ref: '#/components/schemas/Participant'
+        transactions:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - group
+              - transaction
+            properties:
+              group:
+                $ref: '#/components/schemas/GroupRef'
+              transaction:
+                $ref: '#/components/schemas/Transaction'
+    Error401:
+      description: Unauthorized — bearer token missing, malformed, expired, or revoked.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 401
+            code:
+              type: string
+              enum:
+                - AUTH_CREDENTIALS_REQUIRED
+                - AUTH_CREDENTIALS_INVALID
+                - AUTH_CREDENTIALS_EXPIRED
+    Group:
+      type: object
+      required:
+        - token
+        - name
+        - icon
+        - currency
+        - fxRates
+        - lockVersion
+        - createdAt
+        - updatedAt
+      properties:
+        token:
+          $ref: '#/components/schemas/GroupToken'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        icon:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: A single emoji used as the group avatar.
+          example: 🍜
+        currency:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+          description: Base currency for totals and balances (ISO-4217).
+        fxRates:
+          type: object
+          description: |
+            Snapshot of cached FX rates relative to the group's base currency,
+            keyed by ISO-4217 code (e.g. `USD`, `EUR`). Values are decimal
+            strings (`"150.25"`) to avoid float drift. Only currencies warm
+            in the server's rate cache are included; missing codes mean the
+            client should treat the rate as unknown until the next snapshot.
+            The base currency itself is never present.
+          additionalProperties:
+            type: string
+            pattern: ^\d+(\.\d+)?$
+            example: '150.25'
+          example:
+            USD: '150.25'
+            EUR: '163.10'
+        lockVersion:
+          type: integer
+          minimum: 0
+          description: |
+            Optimistic lock counter — bump on every persisted update.
+            Send the last-seen value on writes; mismatches return 409
+            `CONFLICT` with the current server state on `current`.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: |
+            Tombstone timestamp. `null` for live rows; an ISO-8601
+            timestamp once soft-deleted. Tombstones still ship in
+            snapshot responses so cached clients converge.
+        shareUrl:
+          type: string
+          description: |
+            Absolute invite link for the group, the same one the web app's
+            share sheet shows. Opening it needs no account for public groups.
+            The path keeps the group name readable, so it may contain unescaped
+            Unicode (an IRI, e.g. `https://wariwari.jp/g/沖縄旅行-…`);
+            percent-encode it before handing it to a strict URL parser.
+          example: https://wariwari.jp/g/okinawa-trip-mK5Ph2xeykLMKpRM?utm_content=link&utm_medium=share&utm_source=group_invite
+    Pagination:
+      type: object
+      description: Opaque cursor pagination metadata.
+      required:
+        - hasMore
+        - cursor
+      properties:
+        hasMore:
+          type: boolean
+          description: Whether more results are available.
+          example: true
+        cursor:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          description: Opaque token to pass as `cursor` on the next request. `null` means there is no next page.
+          example: eyJraW5kIjoia2V5c2V0IiwiY3Vyc29yIjoxMjN9
+      additionalProperties: false
+    GroupList:
+      type: object
+      required:
+        - groups
+        - pagination
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/Group'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+    GroupCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - icon
+        - participants
+      properties:
+        token:
+          allOf:
+            - $ref: '#/components/schemas/GroupToken'
+          description: |
+            Optional client-generated group token (16-char base58). When absent
+            the server generates one. A supplied token is a stable identity; reuse
+            under a different operation returns `DUPLICATE_TOKEN` rather than updating.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        icon:
+          type: string
+          minLength: 1
+          maxLength: 8
+        currency:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+          default: JPY
+          description: Base currency. When omitted, the account's preferred currency, else the request country's, else USD for English and JPY otherwise.
+        participants:
+          type: array
+          maxItems: 1000
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - name
+            properties:
+              token:
+                allOf:
+                  - $ref: '#/components/schemas/Token'
+                description: |
+                  Optional client-generated token. When absent the server
+                  generates one (`SecureRandom.base58(24)`).
+              name:
+                type: string
+                minLength: 1
+                maxLength: 60
+              color:
+                $ref: '#/components/schemas/ParticipantColor'
+        creatorParticipantToken:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: |
+            Token of the participant in `participants` who is creating the group.
+            With an account credential that participant is linked to the account as
+            admin and moved first. When omitted, the participant named like the
+            account is, or else a new one is added. Must match one of the supplied
+            participant tokens.
+        categories:
+          type: array
+          maxItems: 1000
+          description: |
+            Optional complete initial category set for an offline-created duplicate.
+            When supplied, the server preserves these client tokens and does not add
+            its default categories. When omitted, the regular defaults are created.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - token
+              - emoji
+              - name
+              - position
+            properties:
+              token:
+                $ref: '#/components/schemas/Token'
+              emoji:
+                type: string
+                minLength: 1
+                maxLength: 32
+              name:
+                type: string
+                minLength: 1
+                maxLength: 40
+              position:
+                type: integer
+                minimum: 1
+    Visibility:
+      type: string
+      enum:
+        - public_editable
+        - public_view_only
+        - private_registered
+      description: |
+        Who can open and edit the group by link. `public_editable` lets anyone
+        with the link edit, `public_view_only` lets them view, and
+        `private_registered` limits access to linked members.
+    GroupCategory:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - emoji
+        - name
+        - position
+        - lockVersion
+        - createdAt
+        - updatedAt
+      properties:
+        token:
+          $ref: '#/components/schemas/Token'
+        emoji:
+          type: string
+          minLength: 1
+          maxLength: 32
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        position:
+          type: integer
+          minimum: 1
+        lockVersion:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    SuggestedPayment:
+      type: object
+      additionalProperties: false
+      required:
+        - fromParticipantToken
+        - toParticipantToken
+        - amountCents
+        - currency
+      properties:
+        fromParticipantToken:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: Participant token for the member who should pay.
+          example: 7gKMjL9pPWsKaHQ4AbwS5kVj
+        toParticipantToken:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: Participant token for the member who should receive the payment.
+          example: 8mPNkR4qQXtLbJR5CcxT6yWa
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          $ref: '#/components/schemas/Currency'
+    currencyCentBuckets:
+      type: object
+      additionalProperties:
+        type: integer
+        minimum: 0
+    GroupSnapshot:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          required:
+            - generatedAt
+            - readModelVersion
+            - groupCategories
+            - participants
+            - transactions
+            - netByCurrency
+            - suggestedPayments
+            - spendingByCurrency
+            - spendingForcedBuckets
+            - totalBaseCents
+            - transactionsCount
+          properties:
+            visibility:
+              $ref: '#/components/schemas/Visibility'
+            viewerAccess:
+              type: object
+              additionalProperties: false
+              required:
+                - canEdit
+                - canManageSettings
+                - linkedParticipantToken
+              properties:
+                canEdit:
+                  type: boolean
+                canManageSettings:
+                  type: boolean
+                linkedParticipantToken:
+                  oneOf:
+                    - $ref: '#/components/schemas/Token'
+                    - type: 'null'
+            generatedAt:
+              type: string
+              format: date-time
+              description: |
+                Server clock at the moment this snapshot was assembled. The
+                client can use this value as the cache timestamp so "Cached Xm
+                ago" stays honest across clock skew.
+            readModelVersion:
+              type: integer
+              minimum: 0
+              description: Monotonic group snapshot version for client cache invalidation.
+            participants:
+              type: array
+              items:
+                $ref: '#/components/schemas/Participant'
+            groupCategories:
+              type: array
+              items:
+                $ref: '#/components/schemas/GroupCategory'
+            transactions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Transaction'
+            suggestedPayments:
+              type: array
+              items:
+                $ref: '#/components/schemas/SuggestedPayment'
+            netByCurrency:
+              type: object
+              description: |
+                Balance net buckets keyed by currency. Inner objects are keyed by
+                participant token and contain signed cent values.
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+            spendingByCurrency:
+              $ref: '#/components/schemas/currencyCentBuckets'
+            spendingForcedBuckets:
+              type: boolean
+            totalBaseCents:
+              type: integer
+              minimum: 0
+            transactionsCount:
+              type: integer
+              minimum: 0
+      $defs:
+        currencyCentBuckets:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+    Error404:
+      description: Not Found — resource missing or not visible from this request.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 404
+            code:
+              type: string
+              enum:
+                - NOT_FOUND
+    PaymentMethod:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - network
+        - networkLabel
+        - identifier
+        - preferred
+        - position
+        - supportsPaymentPrefill
+        - lockVersion
+      description: One of the caller's account payment methods.
+      properties:
+        token:
+          $ref: '#/components/schemas/Token'
+        network:
+          $ref: '#/components/schemas/PaymentNetwork'
+        networkLabel:
+          type: string
+          description: Localized display name for the network (follows the request locale).
+        identifier:
+          type: string
+          minLength: 1
+          maxLength: 120
+        preferred:
+          type: boolean
+          description: Whether this is the caller's preferred method, shown first on member rows.
+        position:
+          type: integer
+          minimum: 1
+          description: Stable display order within the caller's methods.
+        shareUrl:
+          type:
+            - string
+            - 'null'
+          format: uri
+          description: Deep link to pay the caller, when the network supports one (e.g. Revolut, Wise).
+        supportsPaymentPrefill:
+          type: boolean
+          description: Whether the network can pre-fill a payment amount.
+        lockVersion:
+          type: integer
+          minimum: 0
+    Error409:
+      description: |
+        Conflict. Check `code`:
+
+        - `CONFLICT`: stale `lockVersion`; `current` contains the latest
+          server state.
+        - `IDEMPOTENCY_KEY_IN_USE`: the same `Idempotency-Key` was reused with
+          a different request body.
+        - `IDEMPOTENCY_RECEIPT_EXPIRED`: the operation is older than receipt retention.
+        - `DUPLICATE_TOKEN`: a create reused an entity token without replaying its operation ID.
+        - `IDENTITY_LINKED_ELSEWHERE`: onboarding with a sign-in method another account owns.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 409
+            code:
+              type: string
+              enum:
+                - CONFLICT
+                - IDEMPOTENCY_KEY_IN_USE
+                - IDEMPOTENCY_RECEIPT_EXPIRED
+                - DUPLICATE_TOKEN
+                - IDENTITY_LINKED_ELSEWHERE
+            current:
+              description: |
+                Only sent with `CONFLICT`, and only when the rejected record is a
+                group, category, transaction, participant, or payment method; other
+                stale records omit it. Shape matches the resource whose write was
+                rejected.
+              oneOf:
+                - $ref: '#/components/schemas/Group'
+                - $ref: '#/components/schemas/GroupCategory'
+                - $ref: '#/components/schemas/Transaction'
+                - $ref: '#/components/schemas/Participant'
+                - $ref: '#/components/schemas/PaymentMethod'
+    Error403:
+      description: |
+        Forbidden — the request is authenticated, but the caller is not allowed
+        to access this resource or perform this action.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 403
+            code:
+              type: string
+              enum:
+                - ACCESS_DENIED
+                - INSUFFICIENT_PERMISSIONS
+    GroupUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - lockVersion
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        icon:
+          type: string
+          minLength: 1
+          maxLength: 8
+        currency:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+          description: |
+            New base currency. Existing transactions are rebased onto it in the
+            background.
+        lockVersion:
+          type: integer
+          minimum: 0
+          description: Latest lock version from the group being updated.
+    TransactionVersionKind:
+      type: string
+      enum:
+        - create
+        - update
+        - destroy
+        - restore
+      description: |
+        Kind of audit-log entry.
+          • `create` — initial revision (no `changes`).
+          • `update` — field-level edit; `changes` lists per-field diffs.
+          • `destroy` — soft-delete (no `changes`).
+          • `restore` — undo of a soft-delete (no `changes`).
+    TransactionVersionField:
+      type: string
+      enum:
+        - amount
+        - description
+        - category
+        - paid_by
+        - split_type
+        - date
+        - time_of_day
+        - splits
+      description: |
+        Semantic key for a single change entry. The values are
+        render-ready strings (currency-formatted amounts, resolved
+        participant names, localized dates and labels) — clients
+        shouldn't reformat them, just print.
+    TransactionVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - transaction
+        - createdAt
+        - recordedAt
+        - changes
+      description: |
+        One entry in the audit log for a transaction. `changes` is a
+        render-ready list of human-facing field changes for `update`
+        rows; create / destroy / restore rows return an empty array (the
+        `kind` label carries the meaning). Imported or historical edits can
+        leave `actor` null.
+
+        Field formatting (server-side, locale-aware):
+          • amount: currency-formatted strings; when the currency itself
+            changes, both sides are suffixed with the currency code and
+            `currencyChanged: true`.
+          • paid_by: resolved participant name (or a localized "Removed
+            member" when the participant has been hard-deleted).
+          • date: localized via `I18n.l(:short)`.
+          • split_type: localized label.
+          • splits: a summary entry with `summaryCount` only — no
+            `before`/`after` (the per-share diff would be too noisy).
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        kind:
+          $ref: '#/components/schemas/TransactionVersionKind'
+        transaction:
+          type: object
+          additionalProperties: false
+          required:
+            - token
+            - description
+          properties:
+            token:
+              $ref: '#/components/schemas/Token'
+            description:
+              type: string
+              minLength: 1
+              maxLength: 120
+            deletedAt:
+              type:
+                - string
+                - 'null'
+              format: date-time
+        actor:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required:
+                - name
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  description: User's display name at the time of the edit.
+          description: |
+            Who made the edit. `null` when no actor is available.
+        createdAt:
+          type: string
+          format: date-time
+          description: When the server stored the change.
+        recordedAt:
+          type: string
+          format: date-time
+          description: |
+            When the change was made: the write's `Recorded-At` header when it sent a
+            plausible one, otherwise the same as `createdAt`. Activity is ordered by
+            this, newest first.
+        changes:
+          type: array
+          description: Per-field changes; empty for create/destroy/restore.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - field
+            properties:
+              field:
+                $ref: '#/components/schemas/TransactionVersionField'
+              before:
+                type:
+                  - string
+                  - 'null'
+                description: |
+                  Pre-edit value, render-ready. `null` for the first
+                  appearance of a field (e.g. on create, though create
+                  rows skip `changes` entirely).
+              after:
+                type:
+                  - string
+                  - 'null'
+                description: Post-edit value, render-ready.
+              currencyChanged:
+                type: boolean
+                description: |
+                  Set on every `amount` entry: `true` when the currency
+                  itself changed, `false` otherwise. Absent on other fields.
+              summaryCount:
+                type: integer
+                minimum: 0
+                description: |
+                  Only set on the `splits` entry — number of participants
+                  whose share was added, removed, or changed.
+    TransactionActivityList:
+      type: object
+      required:
+        - activity
+        - pagination
+      properties:
+        activity:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionVersion'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+    GroupCategoryCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - emoji
+        - name
+      properties:
+        token:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: Optional client-generated category token for offline creation.
+        emoji:
+          type: string
+          minLength: 1
+          maxLength: 8
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        position:
+          type: integer
+          minimum: 1
+    GroupCategoryUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - lockVersion
+      properties:
+        emoji:
+          type: string
+          minLength: 1
+          maxLength: 8
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        position:
+          type: integer
+          minimum: 1
+        lockVersion:
+          type: integer
+          minimum: 0
+          description: Latest lock version from the category being updated.
+    ParticipantCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        token:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: |
+            Optional client-generated participant token. When absent the server
+            generates one. A supplied token is a stable identity; reuse under a
+            different operation returns `DUPLICATE_TOKEN` rather than updating.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        color:
+          $ref: '#/components/schemas/ParticipantColor'
+    ParticipantUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - lockVersion
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        color:
+          $ref: '#/components/schemas/ParticipantColor'
+        lockVersion:
+          type: integer
+          minimum: 0
+          description: Latest lock version from the participant being updated.
+    TransactionList:
+      type: object
+      required:
+        - transactions
+        - pagination
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+    TimeOfDay:
+      type: string
+      description: Local wall-clock time, `HH:MM` or `HH:MM:SS` (24-hour).
+      pattern: ^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$
+      example: '19:30'
+    TransactionCreate:
+      type: object
+      additionalProperties: false
+      description: |
+        Create an expense or settlement payment. `splits` must contain the
+        participants who owe money for the transaction.
+      required:
+        - description
+        - amountCents
+        - currency
+        - splitType
+        - date
+        - paidByToken
+        - splits
+      properties:
+        token:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: |
+            Optional client-generated transaction token. When absent the server
+            generates one. A supplied token is a stable identity; reuse under a
+            different operation returns `DUPLICATE_TOKEN` rather than updating.
+        kind:
+          allOf:
+            - $ref: '#/components/schemas/TransactionKind'
+          default: expense
+          example: expense
+          description: Defaults to `expense`; use `payment` for settlement payments.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 120
+        category:
+          type: string
+          minLength: 1
+          maxLength: 40
+        groupCategoryToken:
+          $ref: '#/components/schemas/Token'
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          $ref: '#/components/schemas/Currency'
+        balanceCurrency:
+          $ref: '#/components/schemas/Currency'
+          description: |
+            Currency bucket used for balances. Omit to use the group currency;
+            send the transaction currency to keep this transaction in a separate
+            original-currency balance bucket.
+        splitType:
+          $ref: '#/components/schemas/SplitType'
+        date:
+          type: string
+          format: date
+        timeOfDay:
+          $ref: '#/components/schemas/TimeOfDay'
+        paidByToken:
+          $ref: '#/components/schemas/Token'
+        splits:
+          type: array
+          maxItems: 1000
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - participantToken
+            description: |
+              `amountCents` is each participant's share. With `splitType: equal`
+              it may be omitted from every split, and the server divides the
+              amount evenly (leftover cents go to the first participants). A split
+              of zero leaves that participant out; no zero split is stored.
+            properties:
+              participantToken:
+                $ref: '#/components/schemas/Token'
+              amountCents:
+                type: integer
+                minimum: 0
+    TransactionUpdate:
+      type: object
+      additionalProperties: false
+      description: |
+        Update an existing transaction with optimistic concurrency. Sending
+        `splits` replaces all existing splits.
+      required:
+        - lockVersion
+      properties:
+        kind:
+          allOf:
+            - $ref: '#/components/schemas/TransactionKind'
+          description: Use `payment` for settlement payments.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 120
+        category:
+          type: string
+          minLength: 1
+          maxLength: 40
+        groupCategoryToken:
+          description: Omit to keep the category; `null` clears it.
+          oneOf:
+            - $ref: '#/components/schemas/Token'
+            - type: 'null'
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          $ref: '#/components/schemas/Currency'
+        balanceCurrency:
+          $ref: '#/components/schemas/Currency'
+          description: |
+            Currency bucket used for balances. Omit to keep the current value, unless
+            the edit changes the amount or currency: then it moves to the group currency.
+            Only the group currency or the transaction's own `currency` is kept; any
+            other value (such as the group's previous currency) means the group currency.
+            Changing the group currency re-expresses balances without changing any
+            transaction's `lockVersion`.
+        splitType:
+          $ref: '#/components/schemas/SplitType'
+        date:
+          type: string
+          format: date
+        timeOfDay:
+          $ref: '#/components/schemas/TimeOfDay'
+        paidByToken:
+          $ref: '#/components/schemas/Token'
+        splits:
+          type: array
+          maxItems: 1000
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - participantToken
+            description: Same rules as TransactionCreate splits; `amountCents` may be omitted from every split for an equal split.
+            properties:
+              participantToken:
+                $ref: '#/components/schemas/Token'
+              amountCents:
+                type: integer
+                minimum: 0
+        lockVersion:
+          type: integer
+          minimum: 0
+          description: Latest lock version from the transaction being updated.
+    BulkEditInput:
+      type: object
+      additionalProperties: false
+      required:
+        - transactionTokens
+        - lockVersions
+      description: |
+        Selects transactions by token and applies the supplied changes. At least
+        one change field must be present for an update.
+      properties:
+        transactionTokens:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/Token'
+          minItems: 1
+        lockVersions:
+          type: object
+          maxProperties: 1000
+          description: Last observed revision for every selected transaction token.
+          additionalProperties:
+            type: integer
+            minimum: 0
+        paidByToken:
+          $ref: '#/components/schemas/Token'
+        groupCategoryToken:
+          $ref: '#/components/schemas/Token'
+        splitType:
+          $ref: '#/components/schemas/SplitType'
+        splitParticipantTokens:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/Token'
+        splitPercentages:
+          type: object
+          maxProperties: 1000
+          additionalProperties:
+            type:
+              - number
+              - string
+        splitShares:
+          type: object
+          maxProperties: 1000
+          additionalProperties:
+            type:
+              - number
+              - string
+        splitNames:
+          type: string
+          description: At most 1,000 names separated by commas, Japanese commas or newlines.
+          pattern: (?<![\s\S])[^,、\n]*(?:[,、\n][^,、\n]*){0,999}(?![\s\S])
+        date:
+          type: string
+          format: date
+        timeOfDay:
+          $ref: '#/components/schemas/TimeOfDay'
+    BulkEditDelete:
+      type: object
+      additionalProperties: false
+      required:
+        - transactionTokens
+        - lockVersions
+      properties:
+        transactionTokens:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/Token'
+          minItems: 1
+        lockVersions:
+          type: object
+          maxProperties: 1000
+          additionalProperties:
+            type: integer
+            minimum: 0
+          description: Required lock version for every transaction token.
+    GroupSettings:
+      type: object
+      required:
+        - token
+        - currency
+        - visibility
+        - lockVersion
+        - categories
+        - participants
+      additionalProperties: false
+      properties:
+        token:
+          $ref: '#/components/schemas/GroupToken'
+        name:
+          type:
+            - string
+            - 'null'
+        currency:
+          $ref: '#/components/schemas/Currency'
+        visibility:
+          $ref: '#/components/schemas/Visibility'
+        canEnableMembersOnly:
+          type: boolean
+          description: True when the viewer is linked to a participant and can enable members-only access.
+        lockVersion:
+          type: integer
+          minimum: 0
+        categories:
+          type: array
+          items:
+            type: object
+            description: Group category with a `used` flag indicating it has transactions.
+            additionalProperties: false
+            properties:
+              token:
+                $ref: '#/components/schemas/Token'
+              emoji:
+                type:
+                  - string
+                  - 'null'
+              name:
+                type: string
+              position:
+                type: integer
+              lockVersion:
+                type: integer
+                minimum: 0
+              createdAt:
+                type: string
+                format: date-time
+              updatedAt:
+                type: string
+                format: date-time
+              used:
+                type: boolean
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Participant'
+    GroupSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - lockVersion
+      properties:
+        currency:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+          description: |
+            New base currency. Existing transactions are rebased onto it in the
+            background, which bumps their `lockVersion`: re-read a transaction
+            before updating or deleting it after a currency change.
+        visibility:
+          $ref: '#/components/schemas/Visibility'
+        categories:
+          type: array
+          maxItems: 1000
+          description: Edits to existing categories, addressed by token.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - token
+            properties:
+              token:
+                $ref: '#/components/schemas/Token'
+              emoji:
+                type: string
+                maxLength: 32
+              name:
+                type: string
+                maxLength: 40
+              position:
+                type: integer
+                minimum: 1
+        participants:
+          type: array
+          maxItems: 1000
+          description: |
+            Role changes, addressed by token. Roles apply only to participants
+            linked to an account; a role for any other participant is a 400.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - token
+            properties:
+              token:
+                $ref: '#/components/schemas/Token'
+              membershipRole:
+                $ref: '#/components/schemas/MembershipRole'
+        lockVersion:
+          type: integer
+          minimum: 0
+          description: Latest group lock version.
+    GroupNotificationSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - muted
+      description: The signed-in member's push-notification settings for one group.
+      properties:
+        muted:
+          type: boolean
+          description: When true, this member receives no push notifications for the group.
+    FxRate:
+      type: object
+      required:
+        - from
+        - to
+        - rate
+      additionalProperties: false
+      properties:
+        from:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+          description: Source currency.
+        to:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+          description: Group currency (target).
+        rate:
+          type: string
+          pattern: ^\d+(\.\d+)?$
+          description: Decimal conversion rate as a string to preserve precision.
+          example: '0.0067'
+        provisional:
+          type: boolean
+          description: |
+            `true` when no rate is published for the requested day yet and `rate` is
+            the latest one, so an expense saved for that day may be converted again.
+    StatsDateRange:
+      type: string
+      enum:
+        - all_time
+        - last_12_weeks
+        - last_6_months
+        - this_month
+        - last_month
+        - last_3_months
+        - this_year
+      description: Statistics window. Unknown values fall back to `all_time`.
+    StatsDelta:
+      type:
+        - object
+        - 'null'
+      description: A period-over-period change in raw minor units.
+      additionalProperties: false
+      properties:
+        direction:
+          type: integer
+          enum:
+            - -1
+            - 0
+            - 1
+          description: Sign of the change (-1 down, 0 flat, 1 up).
+        cents:
+          type: integer
+          description: Signed difference versus the previous period.
+        percent:
+          type:
+            - number
+            - 'null'
+          description: Absolute percent change, or null when the previous period was zero.
+    GroupStats:
+      type: object
+      required:
+        - currency
+        - totalSpendCents
+        - transactionCount
+        - averageExpenseCents
+        - categoryBreakdown
+        - perPersonCents
+        - perDayCents
+        - spanDays
+        - timelineGranularity
+        - timeline
+        - memberTotals
+      description: |
+        Spending statistics for a group. All money values are raw minor units in the
+        group currency — the client formats them. Expenses balanced in another
+        currency (kept in their own currency, or waiting for a rate) are left out;
+        `otherCurrencies` says whether any matched the filters.
+      additionalProperties: false
+      properties:
+        currency:
+          $ref: '#/components/schemas/Currency'
+        filters:
+          type: object
+          additionalProperties: false
+          properties:
+            dateRange:
+              $ref: '#/components/schemas/StatsDateRange'
+            participant:
+              oneOf:
+                - $ref: '#/components/schemas/Token'
+                - type: 'null'
+            category:
+              oneOf:
+                - $ref: '#/components/schemas/Token'
+                - type: 'null'
+            date:
+              type:
+                - string
+                - 'null'
+              format: date
+            month:
+              type:
+                - string
+                - 'null'
+              description: Selected month filter as `YYYY-MM`, or null.
+            week:
+              type:
+                - string
+                - 'null'
+              format: date
+              description: Selected week start date, normalized to Monday, or null.
+        totalSpendCents:
+          type: integer
+        transactionCount:
+          type: integer
+          minimum: 0
+        averageExpenseCents:
+          type: integer
+        topCategory:
+          type:
+            - object
+            - 'null'
+          additionalProperties: false
+          properties:
+            name:
+              type: string
+            cents:
+              type: integer
+            sharePercent:
+              type: number
+        categoryBreakdown:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              cents:
+                type: integer
+              sharePercent:
+                type: number
+        perPersonCents:
+          type: integer
+          description: Total spend divided by the group's members.
+        perDayCents:
+          type: integer
+          description: Total spend divided by `spanDays`.
+        spanDays:
+          type: integer
+          minimum: 1
+          description: Days in the timeline window — the selected period, starting no earlier than the group's first expense.
+        timelineGranularity:
+          type: string
+          enum:
+            - date
+            - week
+            - month
+          description: Bucket size of `timeline`, picked from the length of the selected period.
+        timeline:
+          type: array
+          description: |
+            The spend-over-time chart: one bucket per day, week or month across the
+            window, including empty ones. `start`/`end` are clipped to the window, so
+            the first and last week of a period can be partial.
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              start:
+                type: string
+                format: date
+              end:
+                type: string
+                format: date
+              cents:
+                type: integer
+              expenseCount:
+                type: integer
+                minimum: 0
+        otherCurrencies:
+          type: boolean
+          description: |
+            `true` when expenses matching the filters balance in a currency other
+            than the group's and so are missing from every figure here.
+        memberTotals:
+          type: array
+          description: Every member's paid/share/difference totals in cents (full set, unpaginated).
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              token:
+                $ref: '#/components/schemas/Token'
+              name:
+                type: string
+              cents:
+                type: integer
+              paidCents:
+                type: integer
+              shareCents:
+                type: integer
+              differenceCents:
+                type: integer
+        largestExpenses:
+          type: array
+          description: The biggest expenses in the filtered window (up to 5).
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              transactionToken:
+                oneOf:
+                  - $ref: '#/components/schemas/Token'
+                  - type: 'null'
+                description: Public token of the underlying transaction; lets clients deep-link to the editor.
+              description:
+                type: string
+              cents:
+                type: integer
+              date:
+                type: string
+                format: date
+              category:
+                type: string
+              categoryEmoji:
+                type:
+                  - string
+                  - 'null'
+                description: Resolved emoji for the category, matching the legend in the category filter.
+              paidBy:
+                type:
+                  - string
+                  - 'null'
+              paidByToken:
+                oneOf:
+                  - $ref: '#/components/schemas/Token'
+                  - type: 'null'
+              outlier:
+                type: boolean
+        deltas:
+          type: object
+          description: Change versus the comparable previous period. Each delta is null when no comparison applies.
+          additionalProperties: false
+          properties:
+            total:
+              $ref: '#/components/schemas/StatsDelta'
+            average:
+              $ref: '#/components/schemas/StatsDelta'
+            topCategory:
+              $ref: '#/components/schemas/StatsDelta'
+    PaymentBase:
+      type: object
+      description: Fields shared by `PaymentCreate` and `PaymentUpdate`.
+      required:
+        - fromToken
+        - toToken
+        - amountCents
+      properties:
+        fromToken:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: Token of the participant who paid.
+        toToken:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: Token of the participant who received the payment.
+        amountCents:
+          type: integer
+          minimum: 1
+          description: Payment amount in minor units. Must be positive.
+        currency:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+          description: Defaults to the group currency when omitted.
+        description:
+          type: string
+          maxLength: 120
+          description: |
+            Blank uses the default "From → To" label for the current
+            `fromToken` and `toToken`. On update, omitting the key keeps the
+            current description.
+        date:
+          type: string
+          format: date
+        timeOfDay:
+          $ref: '#/components/schemas/TimeOfDay'
+    PaymentCreate:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PaymentBase'
+        - type: object
+          properties:
+            token:
+              allOf:
+                - $ref: '#/components/schemas/Token'
+              description: Optional client-generated token. Safe retries use the same token and operation ID.
+    PaymentUpdate:
+      description: |
+        Omitted `currency`, `description`, `date` and `timeOfDay` keep the payment's
+        current values. A blank `description` resets it to the default label
+        for the new `fromToken` and `toToken`.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PaymentBase'
+        - type: object
+          required:
+            - lockVersion
+          properties:
+            lockVersion:
+              type: integer
+              minimum: 0
+              description: Latest lock version from the payment being updated.
+    Error409ParticipantClaim:
+      description: |
+        Conflict from claiming a participant. Check `code`:
+
+        - `CONFLICT`: the participant changed while being claimed; `current` is
+          its latest state.
+        - `IDEMPOTENCY_KEY_IN_USE`: the same `Idempotency-Key` was reused with
+          a different request body.
+        - `IDEMPOTENCY_RECEIPT_EXPIRED`: the operation is older than receipt retention.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 409
+            code:
+              type: string
+              enum:
+                - CONFLICT
+                - IDEMPOTENCY_KEY_IN_USE
+                - IDEMPOTENCY_RECEIPT_EXPIRED
+            current:
+              description: Sent with `CONFLICT`.
+              $ref: '#/components/schemas/Participant'
+    PositionMove:
+      type: object
+      additionalProperties: false
+      description: Move to an absolute 1-based `position`, or one step in a `direction`.
+      properties:
+        position:
+          type: integer
+          minimum: 1
+        direction:
+          type: string
+          enum:
+            - up
+            - down
+    BalanceLedgerEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - transactionToken
+        - cents
+        - amountCents
+        - paidCents
+        - shareCents
+      description: |
+        One transaction's part in a ledger line. `cents` is what it adds to the
+        line; the other figures show how that comes out of the bill (for
+        `paid_for_others`, `amountCents - shareCents`; for `paid_for_you`, the
+        participant's `shareCents` of `amountCents`).
+      properties:
+        transactionToken:
+          $ref: '#/components/schemas/Token'
+        cents:
+          type: integer
+          description: What this transaction adds to its line, in the group currency's minor units.
+        amountCents:
+          type: integer
+          description: The transaction's total in the group currency's minor units.
+        paidCents:
+          type: integer
+          description: What the participant paid of this transaction.
+        shareCents:
+          type: integer
+          description: The participant's share of this transaction.
+    BalanceLedgerLine:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - totalCents
+        - entries
+      properties:
+        key:
+          type: string
+          enum:
+            - paid_for_others
+            - paid_for_you
+            - sent
+            - received
+          description: |
+            `paid_for_others` — others' parts of bills the participant paid (adds).
+            `paid_for_you` — the participant's part of bills someone else paid
+            (subtracts). `sent` — payments the participant made (adds).
+            `received` — payments the participant received (subtracts).
+        totalCents:
+          type: integer
+          description: Sum of the entries' `cents`.
+        entries:
+          type: array
+          description: Newest first, like the transaction list.
+          items:
+            $ref: '#/components/schemas/BalanceLedgerEntry'
+    BalanceLedger:
+      type: object
+      additionalProperties: false
+      required:
+        - participantToken
+        - currency
+        - balanceCents
+        - sharedTotalCents
+        - otherCurrencies
+        - lines
+      description: |
+        One participant's balance in the group currency, worked transaction by
+        transaction. `balanceCents` equals
+        `paid_for_others - paid_for_you + sent - received`, the same balance the
+        group shows for this participant in `currency`.
+      properties:
+        participantToken:
+          $ref: '#/components/schemas/Token'
+        currency:
+          $ref: '#/components/schemas/Currency'
+        balanceCents:
+          type: integer
+          description: Signed balance. Positive means the participant is owed money.
+        sharedTotalCents:
+          type: integer
+          description: Total of the bills listed under `paid_for_others` and `paid_for_you`.
+        otherCurrencies:
+          type: boolean
+          description: |
+            `true` when the participant also has transactions kept in another
+            currency; those are balanced in their own currency and left out here.
+        lines:
+          type: array
+          description: Always the four lines, in the order `paid_for_others`, `paid_for_you`, `sent`, `received`.
+          minItems: 4
+          maxItems: 4
+          items:
+            $ref: '#/components/schemas/BalanceLedgerLine'
+    InvitationToken:
+      type: string
+      description: |
+        Invitation token. 16 characters of base58; share it as a join link.
+      minLength: 16
+      maxLength: 16
+      pattern: ^[A-HJ-NP-Za-km-z1-9]{16}$
+      example: 4kPqR7sTuVwXyZa2
+    Invitation:
+      type: object
+      required:
+        - token
+        - membershipRole
+        - url
+        - active
+        - createdAt
+      additionalProperties: false
+      properties:
+        token:
+          $ref: '#/components/schemas/InvitationToken'
+        membershipRole:
+          $ref: '#/components/schemas/MembershipRole'
+        url:
+          type: string
+          format: uri
+          description: The link to share. Opening it while signed in joins the group with `membershipRole`.
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    InvitationList:
+      type: object
+      additionalProperties: false
+      required:
+        - invitations
+      description: Invitations that can still be used, newest first.
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invitation'
+    InvitationCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        membershipRole:
+          $ref: '#/components/schemas/MembershipRole'
+          description: Role granted to whoever accepts. Defaults to editor.
+        expiresIn:
+          type: string
+          enum:
+            - 24h
+            - 7d
+            - 30d
+          description: Expiry window. Omit for a non-expiring invitation.
+    AccessRequestStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      description: |
+        Where the signed-in user's own request to join a group stands. Carries
+        nothing else about the group, so it is safe to show for a private group
+        the user cannot open.
+      properties:
+        status:
+          type: string
+          enum:
+            - none
+            - pending
+            - declined
+            - viewable
+          description: |
+            `none` — no open request; the user may ask (a decline lapses after
+            7 days and reads as `none`). `pending` — waiting for an admin.
+            `declined` — an admin said no recently; asking again returns this
+            until it lapses. `viewable` — the user can already open the group.
+    AccessRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - avatarUrl
+        - createdAt
+      description: A pending request from a signed-in user to join a private group.
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+          description: The requester's display name.
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+          description: |
+            Path to the requester's avatar variant. `null` when they have no
+            avatar. Always relative (`/rails/active_storage/…`).
+        createdAt:
+          type: string
+          format: date-time
+    AccessRequestList:
+      type: object
+      additionalProperties: false
+      required:
+        - accessRequests
+      description: Pending access requests, oldest first.
+      properties:
+        accessRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessRequest'
+    NotificationPreferences:
+      type: object
+      additionalProperties: false
+      required:
+        - newExpense
+        - paymentReceived
+        - invitationAccepted
+        - accessRequested
+        - accessApproved
+      description: |
+        Per-event push-notification toggles for the signed-in user. Every event is
+        on unless explicitly turned off.
+      properties:
+        newExpense:
+          type: boolean
+        paymentReceived:
+          type: boolean
+        invitationAccepted:
+          type: boolean
+        accessRequested:
+          type: boolean
+        accessApproved:
+          type: boolean
+    Account:
+      type: object
+      required:
+        - id
+        - analyticsId
+        - emailAddress
+        - onboarded
+        - createdAt
+        - notificationPreferences
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        analyticsId:
+          type: string
+          format: uuid
+          description: Stable opaque identifier used only to associate analytics events across Wariwari clients.
+        emailAddress:
+          type: string
+          format: email
+        name:
+          type:
+            - string
+            - 'null'
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+        avatarColor:
+          type:
+            - string
+            - 'null'
+        locale:
+          oneOf:
+            - $ref: '#/components/schemas/Locale'
+            - type: 'null'
+        preferredCurrency:
+          $ref: '#/components/schemas/Currency'
+        marketingOptIn:
+          type: boolean
+        notificationPreferences:
+          $ref: '#/components/schemas/NotificationPreferences'
+        billingState:
+          type: object
+          description: Current subscription/billing snapshot for the user.
+          additionalProperties: false
+          properties:
+            planKey:
+              type:
+                - string
+                - 'null'
+            subscribed:
+              type: boolean
+            provider:
+              type:
+                - string
+                - 'null'
+            status:
+              type:
+                - string
+                - 'null'
+            currentPeriodEndsAt:
+              type:
+                - string
+                - 'null'
+              format: date-time
+            endsAt:
+              type:
+                - string
+                - 'null'
+              format: date-time
+        onboarded:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    AccountUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        removeAvatar:
+          type: boolean
+        avatarColor:
+          type:
+            - string
+            - 'null'
+        preferredCurrency:
+          $ref: '#/components/schemas/Currency'
+        locale:
+          $ref: '#/components/schemas/Locale'
+        marketingOptIn:
+          type: boolean
+        notificationPreferences:
+          type: object
+          additionalProperties: false
+          description: Partial update — only the events you send change; omitted events keep their value.
+          properties:
+            newExpense:
+              type: boolean
+            paymentReceived:
+              type: boolean
+            invitationAccepted:
+              type: boolean
+            accessRequested:
+              type: boolean
+            accessApproved:
+              type: boolean
+    FeedbackCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - body
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: The message. At most 5 links.
+        email:
+          type:
+            - string
+            - 'null'
+          maxLength: 254
+          description: |
+            Reply address for an anonymous sender. Ignored when the caller is
+            signed in; the account's email address is used instead.
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error400'
+    PayloadTooLarge:
+      description: JSON API request exceeds 1 MiB. Multipart uploads are excluded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error413'
+    TooManyRequests:
+      description: |
+        Too Many Requests. `RATE_LIMIT_EXCEEDED` means a short-term rate limit or a
+        group's daily change limit was exceeded; retry after `Retry-After`. `QUOTA_EXCEEDED` means a developer API
+        key on a metered plan used its monthly call quota; the `X-Quota-*` headers
+        say when it resets. Monthly quotas are off while full access is enabled.
+      headers:
+        Retry-After:
+          description: |
+            Seconds to wait before retrying: until the short-term window resets, the
+            group's daily change window resets, the monthly quota resets, or (for email-change requests) the hourly window
+            frees a slot.
+          schema:
+            type: integer
+            minimum: 1
+        RateLimit-Scope:
+          description: |
+            What the limit applies to. `group` means this group's daily change limit:
+            only writes to this group need to wait, and other groups can continue.
+            `client` means a limit on this caller (IP address, session or API key):
+            every request should wait. Absent on `QUOTA_EXCEEDED`.
+          schema:
+            type: string
+            enum:
+              - group
+              - client
+        RateLimit-Limit:
+          description: Maximum requests allowed in the active short-term rate-limit window.
+          schema:
+            type: integer
+            minimum: 1
+        RateLimit-Remaining:
+          description: Requests remaining in the active short-term rate-limit window.
+          schema:
+            type: integer
+            minimum: 0
+        RateLimit-Reset:
+          description: Seconds until the active short-term rate-limit window resets.
+          schema:
+            type: integer
+            minimum: 0
+        RateLimit-Policy:
+          description: Short-term rate-limit policy, formatted as `<limit>;w=<window seconds>`.
+          schema:
+            type: string
+        X-Quota-Limit:
+          description: Monthly call quota for a metered developer API key. Only set for metered keys.
+          schema:
+            type: integer
+            minimum: 0
+        X-Quota-Remaining:
+          description: Calls left in the current monthly quota period. Only set for metered keys.
+          schema:
+            type: integer
+            minimum: 0
+        X-Quota-Reset:
+          description: Seconds until the monthly quota period resets. Only set for metered keys.
+          schema:
+            type: integer
+            minimum: 0
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error429'
+    InternalServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error500'
+    ServiceUnavailable:
+      description: A required service or operation is temporarily unavailable. Honor Retry-After when present.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error503'
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error401'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error404'
+    Conflict:
+      description: |
+        Conflict — either a stale `lockVersion` on a write or a reused
+        `Idempotency-Key` with a different body. Switch on `code` to tell
+        them apart.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error409'
+    Forbidden:
+      description: Authenticated, but not allowed to access this resource or action.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error403'
+  parameters:
+    MutationOperationId:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Stable operation UUID for replay-safe writes. Keep the same value and immutable
+        request payload across retries. Receipts are retained for 90 days; older retries
+        return `IDEMPOTENCY_RECEIPT_EXPIRED` and must reconcile before retrying.
+      schema:
+        type: string
+        format: uuid
+    RecordedAt:
+      name: Recorded-At
+      in: header
+      required: false
+      description: |
+        When the change was made on the client, as an ISO 8601 date-time with an
+        offset (`2026-10-20T19:30:00+02:00`). Send it on writes queued offline.
+        Activity rows record it as `recordedAt` and are ordered by it, an omitted
+        `timeOfDay` (or payment `date`) is taken from it in its own offset, and a
+        change recorded more than 12 hours before it reaches the server sends no
+        push notification. A value without an offset, more than 5 minutes in the
+        future, or older than the 90-day receipt window is ignored and server time
+        is used instead; the write itself still goes through.
+      schema:
+        type: string
+    GroupTokenAsParent:
+      name: group_token
+      in: path
+      required: true
+      description: Group token.
+      schema:
+        $ref: '#/components/schemas/GroupToken'
+    MutationExpectedRevision:
+      name: WariWari-Expected-Revision
+      in: header
+      required: true
+      description: |
+        Last server `lockVersion` the client observed on the target record. A
+        mismatch returns `409 CONFLICT` with the current server state.
+      schema:
+        type: integer
+        minimum: 0
+    GroupCategoryToken:
+      name: category_token
+      in: path
+      required: true
+      description: Category token.
+      schema:
+        $ref: '#/components/schemas/Token'
+    ParticipantToken:
+      name: participant_token
+      in: path
+      required: true
+      description: Participant token.
+      schema:
+        $ref: '#/components/schemas/Token'
+    TransactionToken:
+      name: transaction_token
+      in: path
+      required: true
+      description: Transaction token.
+      schema:
+        $ref: '#/components/schemas/Token'
+    PaymentToken:
+      name: payment_token
+      in: path
+      required: true
+      description: Payment token.
+      schema:
+        $ref: '#/components/schemas/Token'
+    InvitationToken:
+      name: invitation_token
+      in: path
+      required: true
+      description: Invitation token.
+      schema:
+        $ref: '#/components/schemas/InvitationToken'
+    AccessRequestId:
+      name: access_request_id
+      in: path
+      required: true
+      description: The pending access request's id, from `listAccessRequests`.
+      schema:
+        type: integer
+        minimum: 1
+x-tagGroups:
+  - name: Account
+    tags:
+      - account
+      - feedback
+  - name: Groups
+    tags:
+      - groups
+  - name: Group Resources
+    tags:
+      - participants
+      - categories
+      - transactions
+      - payments
+      - invitations
+      - access_requests
+      - import

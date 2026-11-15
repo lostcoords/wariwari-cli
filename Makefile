@@ -1,4 +1,4 @@
-.PHONY: build test-unit test check fmt fmt-check vet tidy clean
+.PHONY: build test-unit test check fmt fmt-check vet tidy clean sync-spec
 
 BINARY := $(CURDIR)/bin/wariwari
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -28,6 +28,10 @@ tidy:
 	go mod tidy
 
 check: fmt-check vet test-unit
+
+# Refresh the vendored API contract the tests check commands against.
+sync-spec:
+	cp ../wariwari/openapi/dist/wariwari.bundled.yaml internal/commands/testdata/wariwari.openapi.yaml
 
 clean:
 	rm -rf bin dist
