@@ -88,27 +88,39 @@ func (c *Client) Get(ctx context.Context, path string, query map[string]string) 
 	return c.Do(ctx, http.MethodGet, path, query, nil, nil)
 }
 
-func (c *Client) Post(ctx context.Context, path string, body any, idempotencyKey string) (any, error) {
-	var header http.Header
-	if idempotencyKey != "" {
-		header = http.Header{"Idempotency-Key": {idempotencyKey}}
+// Write carries what a mutation may send beyond its JSON body.
+type Write struct {
+	Body any
+	// IdempotencyKey is an operation UUID; a retry with the same key and body
+	// replays the stored outcome instead of writing twice.
+	IdempotencyKey string
+	// ExpectedRevision is the target record's lockVersion as last observed,
+	// sent as WariWari-Expected-Revision on writes without a body to carry it
+	// (deletes, merges, reorders). Nil sends no header.
+	ExpectedRevision *int
+}
+
+func (w Write) header() http.Header {
+	header := http.Header{}
+	if w.IdempotencyKey != "" {
+		header.Set("Idempotency-Key", w.IdempotencyKey)
 	}
-	return c.Do(ctx, http.MethodPost, path, nil, body, header)
+	if w.ExpectedRevision != nil {
+		header.Set("WariWari-Expected-Revision", strconv.Itoa(*w.ExpectedRevision))
+	}
+	return header
 }
 
-func (c *Client) Patch(ctx context.Context, path string, body any) (any, error) {
-	return c.Do(ctx, http.MethodPatch, path, nil, body, nil)
+func (c *Client) Post(ctx context.Context, path string, w Write) (any, error) {
+	return c.Do(ctx, http.MethodPost, path, nil, w.Body, w.header())
 }
 
-func (c *Client) Delete(ctx context.Context, path string) (any, error) {
-	return c.Do(ctx, http.MethodDelete, path, nil, nil, nil)
+func (c *Client) Patch(ctx context.Context, path string, w Write) (any, error) {
+	return c.Do(ctx, http.MethodPatch, path, nil, w.Body, w.header())
 }
 
-// DeleteRevision deletes a record that guards against stale deletes: the API
-// requires the record's last-read lockVersion in WariWari-Expected-Revision.
-func (c *Client) DeleteRevision(ctx context.Context, path string, lockVersion int) (any, error) {
-	header := http.Header{"WariWari-Expected-Revision": {strconv.Itoa(lockVersion)}}
-	return c.Do(ctx, http.MethodDelete, path, nil, nil, header)
+func (c *Client) Delete(ctx context.Context, path string, w Write) (any, error) {
+	return c.Do(ctx, http.MethodDelete, path, nil, w.Body, w.header())
 }
 
 // GetRaw fetches a non-JSON body, such as the CSV export.

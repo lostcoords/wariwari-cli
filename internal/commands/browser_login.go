@@ -69,7 +69,7 @@ func browserLogin(ctx context.Context, apiURL string, openBrowser bool) (browser
 	if len(hostname) > 80 {
 		hostname = hostname[:80]
 	}
-	data, err := anonymous.Post(ctx, "/cli_authorizations", map[string]any{"clientName": hostname}, "")
+	data, err := anonymous.Post(ctx, "/cli_authorizations", client.Write{Body: map[string]any{"clientName": hostname}})
 	if err != nil {
 		return browserLoginResult{}, err
 	}
@@ -104,7 +104,7 @@ func browserLogin(ctx context.Context, apiURL string, openBrowser bool) (browser
 		}
 		remaining -= interval
 
-		data, err := anonymous.Post(ctx, "/cli_authorizations/token", map[string]any{"deviceCode": authorization.DeviceCode}, "")
+		data, err := anonymous.Post(ctx, "/cli_authorizations/token", client.Write{Body: map[string]any{"deviceCode": authorization.DeviceCode}})
 		if err == nil {
 			body, _ := data.(map[string]any)
 			token, _ := body["token"].(string)

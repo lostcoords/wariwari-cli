@@ -15,329 +15,141 @@ func okJSON(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-func TestCommandContractsUseCurrentAPIRoutes(t *testing.T) {
-	tests := []struct {
-		name       string
-		args       []string
-		group      string
-		wantMethod string
-		wantPath   string
-	}{
-		{
-			name:       "group list pages with take and cursor",
-			args:       []string{"group", "list", "--take", "25", "--cursor", "abc"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups?cursor=abc&take=25",
-		},
-		{
-			name:       "group list filters archived",
-			args:       []string{"group", "list", "--archived"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups?archived=true",
-		},
-		{
-			name:       "group show reads the snapshot",
-			args:       []string{"group", "show", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1",
-		},
-		{
-			name:       "group snapshot is an alias for show",
-			args:       []string{"group", "snapshot", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1",
-		},
-		{
-			name:       "group update uses patch",
-			args:       []string{"group", "update", "grp_1", "--data", `{"lockVersion":1}`},
-			wantMethod: http.MethodPatch,
-			wantPath:   "/v1/groups/grp_1",
-		},
-		{
-			name:       "balance derives from the group snapshot",
-			args:       []string{"balance", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1",
-		},
-		{
-			name:       "participant list derives from the group snapshot",
-			args:       []string{"participant", "list", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1",
-		},
-		{
-			name:       "category list derives from the group snapshot",
-			args:       []string{"category", "list", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1",
-		},
-		{
-			name:       "participant create uses collection post",
-			args:       []string{"participant", "create", "grp_1", "--data", `{"name":"Ada"}`},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/participants",
-		},
-		{
-			name:       "participant update uses patch",
-			args:       []string{"participant", "update", "part_1", "grp_1", "--data", `{"lockVersion":1}`},
-			wantMethod: http.MethodPatch,
-			wantPath:   "/v1/groups/grp_1/participants/part_1",
-		},
-		{
-			name:       "category create uses collection post",
-			args:       []string{"category", "create", "grp_1", "--data", `{"name":"Food","emoji":"🍜"}`},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/categories",
-		},
-		{
-			name:       "category update uses patch",
-			args:       []string{"category", "update", "cat_1", "grp_1", "--data", `{"lockVersion":1}`},
-			wantMethod: http.MethodPatch,
-			wantPath:   "/v1/groups/grp_1/categories/cat_1",
-		},
-		{
-			name:       "transaction list reads the group collection",
-			args:       []string{"transaction", "list", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/transactions",
-		},
-		{
-			name:       "transaction list passes every filter",
-			args:       []string{"transaction", "list", "grp_1", "--from", "2026-01-01", "--to", "2026-01-31", "--category", "cat_1", "--participant", "part_1", "--take", "10", "--cursor", "abc"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/transactions?category=cat_1&cursor=abc&from=2026-01-01&participant=part_1&take=10&to=2026-01-31",
-		},
-		{
-			name:       "transaction show reads one transaction",
-			args:       []string{"transaction", "show", "txn_1", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/transactions/txn_1",
-		},
-		{
-			name:       "transaction create uses collection post",
-			args:       []string{"transaction", "create", "grp_1", "--data", `{"description":"Dinner","amountCents":1000,"currency":"JPY","splitType":"equal","date":"2026-05-23","paidByToken":"part_1","splits":[{"participantToken":"part_1","amountCents":1000}]}`},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/transactions",
-		},
-		{
-			name:       "transaction update uses patch",
-			args:       []string{"transaction", "update", "txn_1", "grp_1", "--data", `{"lockVersion":1}`},
-			wantMethod: http.MethodPatch,
-			wantPath:   "/v1/groups/grp_1/transactions/txn_1",
-		},
-		{
-			name:       "transaction delete soft-deletes",
-			args:       []string{"transaction", "delete", "txn_1", "grp_1", "--lock-version", "1"},
-			wantMethod: http.MethodDelete,
-			wantPath:   "/v1/groups/grp_1/transactions/txn_1",
-		},
-		{
-			name:       "transaction activity reads the nested feed",
-			args:       []string{"transaction", "activity", "txn_1", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/transactions/txn_1/activity",
-		},
-		{
-			name:       "group activity reads the group feed",
-			args:       []string{"group", "activity", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/activity",
-		},
-		{
-			name:       "me reads the account",
-			args:       []string{"me"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/account",
-		},
-		{
-			name:       "account show reads the account",
-			args:       []string{"account", "show"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/account",
-		},
-		{
-			name:       "account update uses patch",
-			args:       []string{"account", "update", "--data", `{"locale":"es"}`},
-			wantMethod: http.MethodPatch,
-			wantPath:   "/v1/account",
-		},
-		{
-			name:       "group delete soft-deletes",
-			args:       []string{"group", "delete", "grp_1", "--lock-version", "2"},
-			wantMethod: http.MethodDelete,
-			wantPath:   "/v1/groups/grp_1",
-		},
-		{
-			name:       "group archive posts the archival",
-			args:       []string{"group", "archive", "grp_1"},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/archival",
-		},
-		{
-			name:       "group unarchive deletes the archival",
-			args:       []string{"group", "unarchive", "grp_1"},
-			wantMethod: http.MethodDelete,
-			wantPath:   "/v1/groups/grp_1/archival",
-		},
-		{
-			name:       "group stats passes token filters",
-			args:       []string{"group", "stats", "grp_1", "--date-range", "this_month", "--participant", "part_1", "--category", "cat_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/stats?category=cat_1&dateRange=this_month&participant=part_1",
-		},
-		{
-			name:       "group fx-rate reads the rate",
-			args:       []string{"group", "fx-rate", "grp_1", "--from", "USD"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/fx_rate?from=USD",
-		},
-		{
-			name:       "group settings reads the settings",
-			args:       []string{"group", "settings", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/settings",
-		},
-		{
-			name:       "group settings update uses patch",
-			args:       []string{"group", "settings", "update", "grp_1", "--data", `{"lockVersion":1}`},
-			wantMethod: http.MethodPatch,
-			wantPath:   "/v1/groups/grp_1/settings",
-		},
-		{
-			name:       "participant balance reads the ledger",
-			args:       []string{"participant", "balance", "part_1", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/participants/part_1/balance",
-		},
-		{
-			name:       "participant delete sends the revision",
-			args:       []string{"participant", "delete", "part_1", "grp_1", "--lock-version", "1"},
-			wantMethod: http.MethodDelete,
-			wantPath:   "/v1/groups/grp_1/participants/part_1",
-		},
-		{
-			name:       "category delete sends the revision",
-			args:       []string{"category", "delete", "cat_1", "grp_1", "--lock-version", "1"},
-			wantMethod: http.MethodDelete,
-			wantPath:   "/v1/groups/grp_1/categories/cat_1",
-		},
-		{
-			name:       "payment create uses collection post",
-			args:       []string{"payment", "create", "grp_1", "--data", `{"fromToken":"part_1","toToken":"part_2","amountCents":100}`},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/payments",
-		},
-		{
-			name:       "payment update uses patch",
-			args:       []string{"payment", "update", "pay_1", "grp_1", "--data", `{"lockVersion":0}`},
-			wantMethod: http.MethodPatch,
-			wantPath:   "/v1/groups/grp_1/payments/pay_1",
-		},
-		{
-			name:       "invitation create posts",
-			args:       []string{"invitation", "create", "grp_1", "--role", "editor", "--expires-in", "7d"},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/invitations",
-		},
-		{
-			name:       "invitation revoke deletes",
-			args:       []string{"invitation", "revoke", "inv_1", "grp_1"},
-			wantMethod: http.MethodDelete,
-			wantPath:   "/v1/groups/grp_1/invitations/inv_1",
-		},
-		{
-			name:       "access-request status reads your own request",
-			args:       []string{"access-request", "status", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/access_request",
-		},
-		{
-			name:       "access-request create asks to join",
-			args:       []string{"access-request", "create", "grp_1"},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/access_request",
-		},
-		{
-			name:       "access-request list reads pending requests",
-			args:       []string{"access-request", "list", "grp_1"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/groups/grp_1/access_requests",
-		},
-		{
-			name:       "access-request approve posts the approval",
-			args:       []string{"access-request", "approve", "7", "grp_1"},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/access_requests/7/approval",
-		},
-		{
-			name:       "access-request decline posts the decline",
-			args:       []string{"access-request", "decline", "7", "grp_1"},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/groups/grp_1/access_requests/7/decline",
-		},
-		{
-			name:       "search sends the query",
-			args:       []string{"search", "ramen", "dinner"},
-			wantMethod: http.MethodGet,
-			wantPath:   "/v1/search?q=ramen+dinner",
-		},
-		{
-			name:       "feedback posts the message",
-			args:       []string{"feedback", "Love", "it"},
-			wantMethod: http.MethodPost,
-			wantPath:   "/v1/feedback",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token", Group: tt.group}
-			stdout, _, requests, err := runRootCommand(t, cfg, okJSON, append(tt.args, "--json")...)
-			if err != nil {
-				t.Fatalf("Execute() error = %v", err)
-			}
-			if !strings.Contains(stdout, `"ok": true`) {
-				t.Fatalf("expected JSON success output, got %s", stdout)
-			}
-			if len(requests) != 1 {
-				t.Fatalf("expected 1 request, got %d", len(requests))
-			}
-			if requests[0].Method != tt.wantMethod {
-				t.Fatalf("method = %s, want %s", requests[0].Method, tt.wantMethod)
-			}
-			if requests[0].Path != tt.wantPath {
-				t.Fatalf("path = %s, want %s", requests[0].Path, tt.wantPath)
-			}
-			if got := requests[0].Header.Get("Authorization"); got != "Bearer test-token" {
-				t.Fatalf("authorization header = %q", got)
-			}
-		})
-	}
+// contract pins one command to the request it ends with. operation is the
+// spec's operationId; spec_test.go checks the method, path template and
+// required headers against the vendored OpenAPI document.
+type contract struct {
+	name      string
+	args      []string
+	operation string
+	method    string
+	path      string
+	headers   map[string]string
+	// reads is how many GETs the command makes before its final request,
+	// e.g. to learn a lockVersion.
+	reads int
 }
 
-func TestGuardedDeletesSendTheExpectedRevision(t *testing.T) {
-	for _, args := range [][]string{
-		{"group", "delete", "grp_1"},
-		{"participant", "delete", "part_1", "grp_1"},
-		{"category", "delete", "cat_1", "grp_1"},
-		{"transaction", "delete", "txn_1", "grp_1"},
-	} {
-		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
-			cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
-			_, _, requests, err := runRootCommand(t, cfg, okJSON, args...)
-			if err == nil || !strings.Contains(err.Error(), "lock-version") {
-				t.Fatalf("error = %v, want the required --lock-version flag", err)
-			}
-			if len(requests) != 0 {
-				t.Fatalf("expected no request without --lock-version, got %d", len(requests))
-			}
+// contractRecord answers every GET: a group snapshot carrying one participant
+// and one category, which also stands in for a transaction record.
+const contractRecord = `{"ok":true,"token":"grp_1","lockVersion":7,
+	"participants":[{"token":"part_1","lockVersion":3}],
+	"groupCategories":[{"token":"cat_1","lockVersion":2}]}`
 
-			_, _, requests, err = runRootCommand(t, cfg, okJSON, append(args, "--lock-version", "3")...)
-			if err != nil {
-				t.Fatalf("Execute() error = %v", err)
+func contractHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		_, _ = w.Write([]byte(contractRecord))
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+var contracts = []contract{
+	{name: "account show", args: []string{"account", "show"}, operation: "showAccount", method: "GET", path: "/v1/account"},
+	{name: "me is account show", args: []string{"me"}, operation: "showAccount", method: "GET", path: "/v1/account"},
+	{name: "account update", args: []string{"account", "update", "--data", `{"locale":"ja"}`}, operation: "updateAccount", method: "PATCH", path: "/v1/account"},
+	{name: "search joins the query", args: []string{"search", "ramen", "night"}, operation: "listSearchResults", method: "GET", path: "/v1/search?q=ramen+night"},
+	{name: "feedback", args: []string{"feedback", "Love", "it", "--email", "a@example.com"}, operation: "createFeedback", method: "POST", path: "/v1/feedback"},
+
+	{name: "group list pages", args: []string{"group", "list", "--take", "25", "--cursor", "abc"}, operation: "listGroups", method: "GET", path: "/v1/groups?cursor=abc&take=25"},
+	{name: "group list archived", args: []string{"group", "list", "--archived"}, operation: "listGroups", method: "GET", path: "/v1/groups?archived=true"},
+	{name: "group show", args: []string{"group", "show", "grp_1"}, operation: "showGroup", method: "GET", path: "/v1/groups/grp_1"},
+	{name: "group snapshot is show", args: []string{"group", "snapshot", "grp_1"}, operation: "showGroup", method: "GET", path: "/v1/groups/grp_1"},
+	{name: "balance reads the snapshot", args: []string{"balance", "grp_1"}, operation: "showGroup", method: "GET", path: "/v1/groups/grp_1"},
+	{name: "participant list reads the snapshot", args: []string{"participant", "list", "grp_1"}, operation: "showGroup", method: "GET", path: "/v1/groups/grp_1"},
+	{name: "category list reads the snapshot", args: []string{"category", "list", "grp_1"}, operation: "showGroup", method: "GET", path: "/v1/groups/grp_1"},
+	{name: "group create", args: []string{"group", "create", "--data", `{"name":"Trip","icon":"🧳","participants":[{"name":"Ada"}]}`}, operation: "createGroup", method: "POST", path: "/v1/groups"},
+	{name: "group update", args: []string{"group", "update", "grp_1", "--data", `{"lockVersion":1}`}, operation: "updateGroup", method: "PATCH", path: "/v1/groups/grp_1"},
+	{name: "group delete reads the lockVersion", args: []string{"group", "delete", "grp_1"}, operation: "deleteGroup", method: "DELETE", path: "/v1/groups/grp_1", headers: map[string]string{"WariWari-Expected-Revision": "7"}, reads: 1},
+	{name: "group delete with --lock-version", args: []string{"group", "delete", "grp_1", "--lock-version", "0"}, operation: "deleteGroup", method: "DELETE", path: "/v1/groups/grp_1", headers: map[string]string{"WariWari-Expected-Revision": "0"}},
+	{name: "group activity", args: []string{"group", "activity", "grp_1"}, operation: "listGroupActivity", method: "GET", path: "/v1/groups/grp_1/activity"},
+	{name: "group archive", args: []string{"group", "archive", "grp_1"}, operation: "archiveGroup", method: "POST", path: "/v1/groups/grp_1/archival"},
+	{name: "group unarchive", args: []string{"group", "unarchive", "grp_1"}, operation: "unarchiveGroup", method: "DELETE", path: "/v1/groups/grp_1/archival"},
+	{name: "group dismiss", args: []string{"group", "dismiss", "grp_1"}, operation: "dismissGroup", method: "POST", path: "/v1/groups/grp_1/dismissal"},
+	{name: "group duplicate", args: []string{"group", "duplicate", "grp_1", "--include-members"}, operation: "duplicateGroup", method: "POST", path: "/v1/groups/grp_1/duplication"},
+	{name: "group join", args: []string{"group", "join", "grp_1"}, operation: "joinGroup", method: "POST", path: "/v1/groups/grp_1/membership"},
+	{name: "group settings", args: []string{"group", "settings", "grp_1"}, operation: "showGroupSettings", method: "GET", path: "/v1/groups/grp_1/settings"},
+	{name: "group settings update", args: []string{"group", "settings", "update", "grp_1", "--data", `{"visibility":"private_registered","lockVersion":1}`}, operation: "updateGroupSettings", method: "PATCH", path: "/v1/groups/grp_1/settings"},
+	{name: "group notifications show", args: []string{"group", "notifications", "show", "grp_1"}, operation: "showGroupNotificationSettings", method: "GET", path: "/v1/groups/grp_1/notification_settings"},
+	{name: "group notifications mute", args: []string{"group", "notifications", "mute", "grp_1"}, operation: "updateGroupNotificationSettings", method: "PATCH", path: "/v1/groups/grp_1/notification_settings"},
+	{name: "group notifications unmute", args: []string{"group", "notifications", "unmute", "grp_1"}, operation: "updateGroupNotificationSettings", method: "PATCH", path: "/v1/groups/grp_1/notification_settings"},
+	{name: "group stats filters", args: []string{"group", "stats", "grp_1", "--date-range", "this_month", "--participant", "part_1"}, operation: "showGroupStats", method: "GET", path: "/v1/groups/grp_1/stats?dateRange=this_month&participant=part_1"},
+	{name: "group fx-rate", args: []string{"group", "fx-rate", "grp_1", "--from", "USD", "--date", "2026-05-01"}, operation: "showGroupFxRate", method: "GET", path: "/v1/groups/grp_1/fx_rate?date=2026-05-01&from=USD"},
+	{name: "group export", args: []string{"group", "export", "grp_1"}, operation: "showGroupCsvExport", method: "GET", path: "/v1/groups/grp_1/csv_export"},
+
+	{name: "participant create", args: []string{"participant", "create", "grp_1", "--data", `{"name":"Ada"}`}, operation: "createParticipant", method: "POST", path: "/v1/groups/grp_1/participants"},
+	{name: "participant update", args: []string{"participant", "update", "part_1", "grp_1", "--data", `{"lockVersion":1}`}, operation: "updateParticipant", method: "PATCH", path: "/v1/groups/grp_1/participants/part_1"},
+	{name: "participant delete reads the lockVersion", args: []string{"participant", "delete", "part_1", "grp_1"}, operation: "deleteParticipant", method: "DELETE", path: "/v1/groups/grp_1/participants/part_1", headers: map[string]string{"WariWari-Expected-Revision": "3"}, reads: 1},
+	{name: "participant delete with --lock-version", args: []string{"participant", "delete", "part_1", "grp_1", "--lock-version", "1"}, operation: "deleteParticipant", method: "DELETE", path: "/v1/groups/grp_1/participants/part_1", headers: map[string]string{"WariWari-Expected-Revision": "1"}},
+	{name: "participant balance", args: []string{"participant", "balance", "part_1", "grp_1"}, operation: "showParticipantBalance", method: "GET", path: "/v1/groups/grp_1/participants/part_1/balance"},
+	{name: "participant claim", args: []string{"participant", "claim", "part_1", "grp_1"}, operation: "claimParticipant", method: "POST", path: "/v1/groups/grp_1/participants/part_1/claim"},
+	{name: "participant unlink", args: []string{"participant", "unlink", "part_1", "grp_1"}, operation: "unlinkParticipant", method: "DELETE", path: "/v1/groups/grp_1/participants/part_1/link"},
+	{name: "participant merge", args: []string{"participant", "merge", "part_1", "grp_1", "--into", "part_2"}, operation: "mergeParticipant", method: "POST", path: "/v1/groups/grp_1/participants/part_1/merge", headers: map[string]string{"WariWari-Expected-Revision": "3"}, reads: 1},
+	{name: "participant move", args: []string{"participant", "move", "part_1", "grp_1", "--up", "--lock-version", "3"}, operation: "moveParticipant", method: "PATCH", path: "/v1/groups/grp_1/participants/part_1/position", headers: map[string]string{"WariWari-Expected-Revision": "3"}},
+
+	{name: "category create", args: []string{"category", "create", "grp_1", "--data", `{"name":"Food","emoji":"🍜"}`}, operation: "createGroupCategory", method: "POST", path: "/v1/groups/grp_1/categories"},
+	{name: "category update", args: []string{"category", "update", "cat_1", "grp_1", "--data", `{"lockVersion":1}`}, operation: "updateGroupCategory", method: "PATCH", path: "/v1/groups/grp_1/categories/cat_1"},
+	{name: "category delete reads the lockVersion", args: []string{"category", "delete", "cat_1", "grp_1"}, operation: "deleteGroupCategory", method: "DELETE", path: "/v1/groups/grp_1/categories/cat_1", headers: map[string]string{"WariWari-Expected-Revision": "2"}, reads: 1},
+
+	{name: "transaction list", args: []string{"transaction", "list", "grp_1"}, operation: "listTransactions", method: "GET", path: "/v1/groups/grp_1/transactions"},
+	{name: "transaction list filters", args: []string{"transaction", "list", "grp_1", "--from", "2026-01-01", "--to", "2026-01-31", "--category", "cat_1", "--participant", "part_1", "--take", "10", "--cursor", "abc"}, operation: "listTransactions", method: "GET", path: "/v1/groups/grp_1/transactions?category=cat_1&cursor=abc&from=2026-01-01&participant=part_1&take=10&to=2026-01-31"},
+	{name: "transaction show", args: []string{"transaction", "show", "txn_1", "grp_1"}, operation: "showTransaction", method: "GET", path: "/v1/groups/grp_1/transactions/txn_1"},
+	{name: "transaction create", args: []string{"transaction", "create", "grp_1", "--data", `{"description":"Dinner"}`}, operation: "createTransaction", method: "POST", path: "/v1/groups/grp_1/transactions"},
+	{name: "transaction update", args: []string{"transaction", "update", "txn_1", "grp_1", "--data", `{"lockVersion":1}`}, operation: "updateTransaction", method: "PATCH", path: "/v1/groups/grp_1/transactions/txn_1"},
+	{name: "transaction delete reads the lockVersion", args: []string{"transaction", "delete", "txn_1", "grp_1"}, operation: "deleteTransaction", method: "DELETE", path: "/v1/groups/grp_1/transactions/txn_1", headers: map[string]string{"WariWari-Expected-Revision": "7"}, reads: 1},
+	{name: "transaction delete with --lock-version", args: []string{"transaction", "delete", "txn_1", "grp_1", "--lock-version", "4"}, operation: "deleteTransaction", method: "DELETE", path: "/v1/groups/grp_1/transactions/txn_1", headers: map[string]string{"WariWari-Expected-Revision": "4"}},
+	{name: "transaction activity", args: []string{"transaction", "activity", "txn_1", "grp_1"}, operation: "listTransactionActivity", method: "GET", path: "/v1/groups/grp_1/transactions/txn_1/activity"},
+	{name: "transaction bulk-edit fills lockVersions", args: []string{"transaction", "bulk-edit", "grp_1", "--data", `{"transactionTokens":["txn_1"],"date":"2026-05-01"}`}, operation: "bulkEditTransactions", method: "POST", path: "/v1/groups/grp_1/transaction_bulk_edit", reads: 1},
+	{name: "transaction bulk-delete", args: []string{"transaction", "bulk-delete", "grp_1", "--data", `{"transactionTokens":["txn_1"],"lockVersions":{"txn_1":2}}`}, operation: "bulkDeleteTransactions", method: "DELETE", path: "/v1/groups/grp_1/transaction_bulk_edit"},
+
+	{name: "payment create", args: []string{"payment", "create", "grp_1", "--data", `{"fromToken":"part_1","toToken":"part_2","amountCents":100}`}, operation: "createPayment", method: "POST", path: "/v1/groups/grp_1/payments"},
+	{name: "payment update", args: []string{"payment", "update", "txn_1", "grp_1", "--data", `{"lockVersion":0}`}, operation: "updatePayment", method: "PATCH", path: "/v1/groups/grp_1/payments/txn_1"},
+
+	{name: "invitation list", args: []string{"invitation", "list", "grp_1"}, operation: "listInvitations", method: "GET", path: "/v1/groups/grp_1/invitations"},
+	{name: "invitation create", args: []string{"invitation", "create", "grp_1", "--role", "editor", "--expires-in", "7d"}, operation: "createInvitation", method: "POST", path: "/v1/groups/grp_1/invitations"},
+	{name: "invitation revoke", args: []string{"invitation", "revoke", "inv_1", "grp_1"}, operation: "revokeInvitation", method: "DELETE", path: "/v1/groups/grp_1/invitations/inv_1"},
+	{name: "invitation accept", args: []string{"invitation", "accept", "inv_1", "grp_1"}, operation: "acceptInvitation", method: "POST", path: "/v1/groups/grp_1/invitations/inv_1/accept"},
+	{name: "access-request status", args: []string{"access-request", "status", "grp_1"}, operation: "showAccessRequest", method: "GET", path: "/v1/groups/grp_1/access_request"},
+	{name: "access-request create", args: []string{"access-request", "create", "grp_1"}, operation: "requestGroupAccess", method: "POST", path: "/v1/groups/grp_1/access_request"},
+	{name: "access-request list", args: []string{"access-request", "list", "grp_1"}, operation: "listAccessRequests", method: "GET", path: "/v1/groups/grp_1/access_requests"},
+	{name: "access-request approve", args: []string{"access-request", "approve", "42", "grp_1"}, operation: "approveAccessRequest", method: "POST", path: "/v1/groups/grp_1/access_requests/42/approval"},
+	{name: "access-request decline", args: []string{"access-request", "decline", "42", "grp_1"}, operation: "declineAccessRequest", method: "POST", path: "/v1/groups/grp_1/access_requests/42/decline"},
+}
+
+func runContract(t *testing.T, c contract, extraArgs ...string) requestRecord {
+	t.Helper()
+	cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
+	args := append(append(append([]string{}, c.args...), extraArgs...), "--json")
+	_, _, requests, err := runRootCommand(t, cfg, contractHandler, args...)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(requests) != c.reads+1 {
+		t.Fatalf("expected %d requests, got %d", c.reads+1, len(requests))
+	}
+	for _, read := range requests[:c.reads] {
+		if read.Method != http.MethodGet {
+			t.Fatalf("preparatory request %s %s is not a read", read.Method, read.Path)
+		}
+	}
+	return requests[c.reads]
+}
+
+func TestCommandContractsUseCurrentAPIRoutes(t *testing.T) {
+	for _, c := range contracts {
+		t.Run(c.name, func(t *testing.T) {
+			got := runContract(t, c)
+			if got.Method != c.method || got.Path != c.path {
+				t.Fatalf("request = %s %s, want %s %s", got.Method, got.Path, c.method, c.path)
 			}
-			if got := requests[0].Header.Get("WariWari-Expected-Revision"); got != "3" {
-				t.Fatalf("WariWari-Expected-Revision = %q, want 3", got)
+			if auth := got.Header.Get("Authorization"); auth != "Bearer test-token" {
+				t.Fatalf("authorization header = %q", auth)
+			}
+			for name, want := range c.headers {
+				if value := got.Header.Get(name); value != want {
+					t.Fatalf("%s = %q, want %q", name, value, want)
+				}
 			}
 		})
 	}
@@ -357,7 +169,7 @@ func TestWriteBodiesMatchTheSpec(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
-			_, _, requests, err := runRootCommand(t, cfg, okJSON, tt.args...)
+			_, _, requests, err := runRootCommand(t, cfg, contractHandler, tt.args...)
 			if err != nil {
 				t.Fatalf("Execute() error = %v", err)
 			}
@@ -422,25 +234,6 @@ func TestGroupExportWritesTheCSV(t *testing.T) {
 	}
 }
 
-func TestGroupCreateSendsIdempotencyKey(t *testing.T) {
-	cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
-	_, _, requests, err := runRootCommand(t, cfg, okJSON,
-		"group", "create", "--data", `{"name":"Trip","icon":"🧳","participants":[{"name":"Ada"}]}`,
-		"--idempotency-key", "retry-1234", "--json")
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if len(requests) != 1 {
-		t.Fatalf("expected 1 request, got %d", len(requests))
-	}
-	if requests[0].Method != http.MethodPost || requests[0].Path != "/v1/groups" {
-		t.Fatalf("got %s %s, want POST /v1/groups", requests[0].Method, requests[0].Path)
-	}
-	if got := requests[0].Header.Get("Idempotency-Key"); got != "retry-1234" {
-		t.Fatalf("Idempotency-Key = %q", got)
-	}
-}
-
 // API keys are managed on the web account page; there is no /v1/api_keys route
 // for the CLI to call.
 func TestTokenCommandNeverCallsTheAPI(t *testing.T) {
@@ -452,7 +245,7 @@ func TestTokenCommandNeverCallsTheAPI(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
-			_, _, requests, err := runRootCommand(t, cfg, okJSON, args...)
+			_, _, requests, err := runRootCommand(t, cfg, contractHandler, args...)
 			if err == nil {
 				t.Fatal("expected an error explaining that keys are web-managed")
 			}

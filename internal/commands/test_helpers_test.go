@@ -72,64 +72,20 @@ func resetCommandGlobals() {
 	api = nil
 	out = &bytes.Buffer{}
 	errOut = &bytes.Buffer{}
-	tokenFlag = ""
-	profileFlag = ""
-	apiURLFlag = ""
-	groupFlag = ""
-	jsonOutput = false
-	quiet = false
-	agent = false
-	idsOnly = false
-	countOnly = false
-	markdown = false
-	styled = false
-	verbose = false
-	jqFilter = ""
-	limit = 0
-	groupCursor = ""
-	groupTake = 0
-	groupArchived = false
-	groupBody = ""
-	groupBodyFile = ""
-	groupIdempotencyKey = ""
-	participantBody = ""
-	participantBodyFile = ""
-	categoryBody = ""
-	categoryBodyFile = ""
-	transactionBody = ""
-	transactionBodyFile = ""
-	transactionCursor = ""
-	transactionTake = 0
-	transactionFrom = ""
-	transactionTo = ""
-	transactionCategory = ""
-	transactionParticipant = ""
-	accountBody = ""
-	accountBodyFile = ""
-	paymentBody = ""
-	paymentBodyFile = ""
-	lockVersion = 0
-	groupOutput = ""
-	groupFxFrom = ""
-	groupStatsDateRange = ""
-	groupStatsParticipant = ""
-	groupStatsCategory = ""
-	groupStatsDate = ""
-	groupStatsMonth = ""
-	groupStatsWeek = ""
-	invitationRole = ""
-	invitationExpiresIn = ""
-	upgradeVersion = ""
-	upgradeCheck = false
-	authNoBrowser = false
-	resetFlagState(rootCmd)
+	resetFlags(rootCmd)
 }
 
-// resetFlagState clears cobra's "changed" marks, which survive between
-// Execute calls and would satisfy a required flag the next test omits.
-func resetFlagState(cmd *cobra.Command) {
-	cmd.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
+// resetFlags returns every flag to its default between in-process runs: cobra
+// binds flags to package variables and keeps their "changed" marks, both of
+// which outlive one Execute.
+func resetFlags(cmd *cobra.Command) {
+	reset := func(f *pflag.Flag) {
+		_ = f.Value.Set(f.DefValue)
+		f.Changed = false
+	}
+	cmd.PersistentFlags().VisitAll(reset)
+	cmd.Flags().VisitAll(reset)
 	for _, child := range cmd.Commands() {
-		resetFlagState(child)
+		resetFlags(child)
 	}
 }

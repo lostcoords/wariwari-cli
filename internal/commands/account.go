@@ -7,9 +7,6 @@ var accountCmd = &cobra.Command{
 	Short: "Show or update your account profile",
 }
 
-var accountBody string
-var accountBodyFile string
-
 var accountShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show the authenticated account",
@@ -46,11 +43,11 @@ accessRequested, accessApproved). Returns the updated account.`,
 		if err := requireAuth(); err != nil {
 			return err
 		}
-		body, err := bodyFrom(accountBody, accountBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/account", body)
+		data, err := api.Patch(cmd.Context(), "/account", write(body))
 		if err != nil {
 			return err
 		}
@@ -60,7 +57,6 @@ accessRequested, accessApproved). Returns the updated account.`,
 
 func init() {
 	rootCmd.AddCommand(accountCmd, meCmd)
+	addDataFlags(accountUpdateCmd)
 	accountCmd.AddCommand(accountShowCmd, accountUpdateCmd)
-	accountUpdateCmd.Flags().StringVar(&accountBody, "data", "", "JSON request body")
-	accountUpdateCmd.Flags().StringVar(&accountBodyFile, "data-file", "", "Read JSON request body from file")
 }

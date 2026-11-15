@@ -7,9 +7,6 @@ var participantCmd = &cobra.Command{
 	Short: "Manage group participants",
 }
 
-var participantBody string
-var participantBodyFile string
-
 var participantListCmd = &cobra.Command{
 	Use:     "list [GROUP_TOKEN]",
 	Aliases: []string{"ls"},
@@ -18,10 +15,7 @@ var participantListCmd = &cobra.Command{
 participants list endpoint.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
@@ -36,24 +30,21 @@ participants list endpoint.`,
 var participantCreateCmd = &cobra.Command{
 	Use:   "create [GROUP_TOKEN]",
 	Short: "Create a participant from JSON",
-	Long: `Create a participant from JSON. Developer API keys are supported.
-
-Include an optional client-generated 24-character base58 token to make retries
-an idempotent upsert. Reuse the same token and body when retrying.`,
+	Long: `Create a participant from JSON: name, optional color (one of the palette
+hex values in the API spec) and an optional client-generated 24-character
+base58 token. Reusing a token returns 409 DUPLICATE_TOKEN; retry a create
+safely with --idempotency-key instead.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
-		body, err := bodyFrom(participantBody, participantBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Post(cmd.Context(), "/groups/"+group+"/participants", body, "")
+		data, err := api.Post(cmd.Context(), "/groups/"+group+"/participants", write(body))
 		if err != nil {
 			return err
 		}
@@ -98,18 +89,15 @@ current snapshot. A stale value returns 409 CONFLICT with the fresh participant
 under "current".`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		body, err := bodyFrom(participantBody, participantBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/participants/"+args[0], body)
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/participants/"+args[0], write(body))
 		if err != nil {
 			return err
 		}
@@ -123,14 +111,15 @@ var participantDeleteCmd = &cobra.Command{
 	Long:  guardedDeleteHelp,
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		data, err := api.DeleteRevision(cmd.Context(), "/groups/"+group+"/participants/"+args[0], lockVersion)
+		w, err := revisedWrite(cmd, nil, snapshotRecord(group, "participants", args[0]))
+		if err != nil {
+			return err
+		}
+		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/participants/"+args[0], w)
 		if err != nil {
 			return err
 		}
@@ -148,10 +137,7 @@ otherCurrencies is true when they also have transactions kept in another
 currency, which are balanced separately and left out here.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
@@ -166,11 +152,9 @@ currency, which are balanced separately and left out here.`,
 
 func init() {
 	addLockVersionFlag(participantDeleteCmd)
+	addDataFlags(participantCreateCmd, participantUpdateCmd)
+	addIdempotencyFlag(participantCreateCmd, participantUpdateCmd, participantDeleteCmd)
 	rootCmd.AddCommand(participantCmd)
 	participantCmd.AddCommand(participantListCmd, participantBalanceCmd, participantCreateCmd, participantUpdateCmd, participantDeleteCmd, participantExampleCmd)
 	participantExampleCmd.AddCommand(participantExampleCreateCmd, participantExampleUpdateCmd)
-	participantCreateCmd.Flags().StringVar(&participantBody, "data", "", "JSON request body")
-	participantCreateCmd.Flags().StringVar(&participantBodyFile, "data-file", "", "Read JSON request body from file")
-	participantUpdateCmd.Flags().StringVar(&participantBody, "data", "", "JSON request body")
-	participantUpdateCmd.Flags().StringVar(&participantBodyFile, "data-file", "", "Read JSON request body from file")
 }

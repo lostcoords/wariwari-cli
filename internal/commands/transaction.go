@@ -7,8 +7,6 @@ var transactionCmd = &cobra.Command{
 	Short: "Manage transactions",
 }
 
-var transactionBody string
-var transactionBodyFile string
 var transactionCursor string
 var transactionTake int
 var transactionFrom string
@@ -31,10 +29,7 @@ nothing returns an empty page, while a malformed date is 400 INVALID_REQUEST.
                    paid for or owes a share of`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
@@ -65,10 +60,7 @@ var transactionShowCmd = &cobra.Command{
 	Short:   "Show a transaction",
 	Args:    cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
@@ -88,24 +80,25 @@ var transactionCreateCmd = &cobra.Command{
 supported. Returns the refreshed group snapshot.
 
 Required: description, amountCents, currency, splitType, date, paidByToken,
-splits. splitType is one of equal, percentage, shares, amount.
+splits. splitType is one of equal, percentage, shares, amount; with equal the
+splits may omit amountCents and the server divides evenly. Optional:
+groupCategoryToken, timeOfDay (HH:MM), and balanceCurrency (send the
+transaction currency to keep it in its own balance bucket instead of the
+group currency). Record a settlement with "wariwari payment create".
 
-Include an optional client-generated 24-character base58 token to make retries
-an idempotent upsert. Reuse the same token and body when retrying.`,
+Reusing a client-generated token returns 409 DUPLICATE_TOKEN; retry a create
+safely with --idempotency-key and the same body.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
-		body, err := bodyFrom(transactionBody, transactionBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Post(cmd.Context(), "/groups/"+group+"/transactions", body, "")
+		data, err := api.Post(cmd.Context(), "/groups/"+group+"/transactions", write(body))
 		if err != nil {
 			return err
 		}
@@ -123,18 +116,21 @@ var transactionExampleCreateCmd = &cobra.Command{
 	Short: "Example payload for creating a transaction",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"token":       "9AHTHuAGT7U2CpSfktrfUAYA",
-			"kind":        "expense",
-			"description": "Team dinner",
-			"amountCents": 12000,
-			"currency":    "JPY",
-			"splitType":   "equal",
-			"date":        "2026-05-23",
-			"paidByToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
+			"token":              "9AHTHuAGT7U2CpSfktrfUAYA",
+			"kind":               "expense",
+			"description":        "Team dinner",
+			"groupCategoryToken": "4QfYk8nE2pRtVwXz7aBcDeFg",
+			"amountCents":        12000,
+			"currency":           "JPY",
+			"balanceCurrency":    "JPY",
+			"splitType":          "equal",
+			"date":               "2026-05-23",
+			"timeOfDay":          "19:30",
+			"paidByToken":        "7gKMjL9pPWsKaHQ4AbwS5kVj",
 			"splits": []map[string]any{
-				{"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj", "amountCents": 4000},
-				{"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa", "amountCents": 4000},
-				{"participantToken": "9nQPmS5rRYuMcKS6DdyU7zXb", "amountCents": 4000},
+				{"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj"},
+				{"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa"},
+				{"participantToken": "9nQPmS5rRYuMcKS6DdyU7zXb"},
 			},
 		}, "Transaction create example")
 	},
@@ -145,14 +141,15 @@ var transactionExampleUpdateCmd = &cobra.Command{
 	Short: "Example payload for updating a transaction",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"description": "Team dinner at ramen shop",
-			"amountCents": 13200,
-			"splitType":   "equal",
-			"paidByToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
+			"description":        "Team dinner at ramen shop",
+			"groupCategoryToken": nil,
+			"amountCents":        13200,
+			"splitType":          "amount",
+			"timeOfDay":          "20:00",
+			"paidByToken":        "7gKMjL9pPWsKaHQ4AbwS5kVj",
 			"splits": []map[string]any{
-				{"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj", "amountCents": 4400},
-				{"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa", "amountCents": 4400},
-				{"participantToken": "9nQPmS5rRYuMcKS6DdyU7zXb", "amountCents": 4400},
+				{"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj", "amountCents": 6600},
+				{"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa", "amountCents": 6600},
 			},
 			"lockVersion": 3,
 		}, "Transaction update example")
@@ -164,21 +161,19 @@ var transactionUpdateCmd = &cobra.Command{
 	Short: "Update a transaction from JSON",
 	Long: `Update a transaction. lockVersion is required — send the value from the
 current record. A stale value returns 409 CONFLICT with the fresh transaction
-under "current". Sending splits replaces all existing splits.`,
+under "current". Sending splits replaces all existing splits; send
+"groupCategoryToken": null to clear the category.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		body, err := bodyFrom(transactionBody, transactionBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], body)
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], write(body))
 		if err != nil {
 			return err
 		}
@@ -192,14 +187,15 @@ var transactionDeleteCmd = &cobra.Command{
 	Long:  guardedDeleteHelp,
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		data, err := api.DeleteRevision(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], lockVersion)
+		w, err := revisedWrite(cmd, nil, transactionRecord(group, args[0]))
+		if err != nil {
+			return err
+		}
+		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], w)
 		if err != nil {
 			return err
 		}
@@ -212,10 +208,7 @@ var transactionActivityCmd = &cobra.Command{
 	Short: "Show transaction activity",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
@@ -231,9 +224,11 @@ var transactionActivityCmd = &cobra.Command{
 
 func init() {
 	addLockVersionFlag(transactionDeleteCmd)
+	addDataFlags(transactionCreateCmd, transactionUpdateCmd, transactionBulkEditCmd, transactionBulkDeleteCmd)
+	addIdempotencyFlag(transactionCreateCmd, transactionUpdateCmd, transactionDeleteCmd, transactionBulkEditCmd, transactionBulkDeleteCmd)
 	rootCmd.AddCommand(transactionCmd)
-	transactionCmd.AddCommand(transactionListCmd, transactionShowCmd, transactionCreateCmd, transactionUpdateCmd, transactionDeleteCmd, transactionActivityCmd, transactionExampleCmd)
-	transactionExampleCmd.AddCommand(transactionExampleCreateCmd, transactionExampleUpdateCmd)
+	transactionCmd.AddCommand(transactionListCmd, transactionShowCmd, transactionCreateCmd, transactionUpdateCmd, transactionDeleteCmd, transactionActivityCmd, transactionBulkEditCmd, transactionBulkDeleteCmd, transactionExampleCmd)
+	transactionExampleCmd.AddCommand(transactionExampleCreateCmd, transactionExampleUpdateCmd, transactionExampleBulkEditCmd)
 	transactionListCmd.Flags().StringVar(&transactionCursor, "cursor", "", "Pagination cursor from pagination.cursor")
 	transactionListCmd.Flags().IntVar(&transactionTake, "take", 0, "Results per page (max 100)")
 	transactionListCmd.Flags().StringVar(&transactionFrom, "from", "", "Only transactions dated on or after this ISO date")
@@ -242,8 +237,4 @@ func init() {
 	transactionListCmd.Flags().StringVar(&transactionParticipant, "participant", "", "Only transactions this participant paid or owes a share of")
 	transactionActivityCmd.Flags().StringVar(&transactionCursor, "cursor", "", "Pagination cursor from pagination.cursor")
 	transactionActivityCmd.Flags().IntVar(&transactionTake, "take", 0, "Results per page (max 100)")
-	transactionCreateCmd.Flags().StringVar(&transactionBody, "data", "", "JSON request body")
-	transactionCreateCmd.Flags().StringVar(&transactionBodyFile, "data-file", "", "Read JSON request body from file")
-	transactionUpdateCmd.Flags().StringVar(&transactionBody, "data", "", "JSON request body")
-	transactionUpdateCmd.Flags().StringVar(&transactionBodyFile, "data-file", "", "Read JSON request body from file")
 }

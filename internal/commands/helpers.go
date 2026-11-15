@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-
-	"github.com/spf13/cobra"
 )
 
 func parseObject(raw string) (map[string]any, error) {
@@ -28,19 +26,6 @@ func parseObjectFile(path string) (map[string]any, error) {
 	return parseObject(string(data))
 }
 
-// lockVersion is the record's last-read lockVersion for a guarded delete,
-// sent as WariWari-Expected-Revision.
-var lockVersion int
-
-const guardedDeleteHelp = `Delete the record. --lock-version is required: pass the lockVersion from the
-record you just read (the group snapshot). A stale value returns 409 CONFLICT.
-Returns the refreshed group snapshot.`
-
-func addLockVersionFlag(cmd *cobra.Command) {
-	cmd.Flags().IntVar(&lockVersion, "lock-version", 0, "The record's current lockVersion (required)")
-	_ = cmd.MarkFlagRequired("lock-version")
-}
-
 // decodeInto converts a decoded JSON value into a typed struct.
 func decodeInto(data any, target any) error {
 	raw, err := json.Marshal(data)
@@ -48,14 +33,6 @@ func decodeInto(data any, target any) error {
 		return err
 	}
 	return json.Unmarshal(raw, target)
-}
-
-// bodyFrom reads a command's JSON body from --data-file, else --data.
-func bodyFrom(raw, path string) (map[string]any, error) {
-	if path != "" {
-		return parseObjectFile(path)
-	}
-	return parseObject(raw)
 }
 
 // pagingQuery builds the keyset pagination query. `take` caps at 100 server

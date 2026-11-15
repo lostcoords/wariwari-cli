@@ -7,9 +7,6 @@ var paymentCmd = &cobra.Command{
 	Short: "Record settle-up payments between participants",
 }
 
-var paymentBody string
-var paymentBodyFile string
-
 var paymentCreateCmd = &cobra.Command{
 	Use:   "create [GROUP_TOKEN]",
 	Short: "Record a payment from JSON",
@@ -17,22 +14,19 @@ var paymentCreateCmd = &cobra.Command{
 to the group currency; description, date and timeOfDay are optional. Take the
 amounts from the snapshot's suggestedPayments to settle up.
 
-Include an optional client-generated 24-character base58 token to make retries
-safe. Returns the refreshed group snapshot.`,
+Retry safely with --idempotency-key and the same body. Returns the refreshed
+group snapshot.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
-		body, err := bodyFrom(paymentBody, paymentBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Post(cmd.Context(), "/groups/"+group+"/payments", body, "")
+		data, err := api.Post(cmd.Context(), "/groups/"+group+"/payments", write(body))
 		if err != nil {
 			return err
 		}
@@ -51,18 +45,15 @@ A payment is a transaction of kind payment: read it with "transaction show" and
 delete it with "transaction delete". Returns the refreshed group snapshot.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		body, err := bodyFrom(paymentBody, paymentBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/payments/"+args[0], body)
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/payments/"+args[0], write(body))
 		if err != nil {
 			return err
 		}
@@ -105,10 +96,8 @@ var paymentExampleUpdateCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(paymentCmd)
+	addDataFlags(paymentCreateCmd, paymentUpdateCmd)
+	addIdempotencyFlag(paymentCreateCmd, paymentUpdateCmd)
 	paymentCmd.AddCommand(paymentCreateCmd, paymentUpdateCmd, paymentExampleCmd)
 	paymentExampleCmd.AddCommand(paymentExampleCreateCmd, paymentExampleUpdateCmd)
-	for _, cmd := range []*cobra.Command{paymentCreateCmd, paymentUpdateCmd} {
-		cmd.Flags().StringVar(&paymentBody, "data", "", "JSON request body")
-		cmd.Flags().StringVar(&paymentBodyFile, "data-file", "", "Read JSON request body from file")
-	}
 }

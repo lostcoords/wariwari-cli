@@ -15,10 +15,7 @@ var accessRequestStatusCmd = &cobra.Command{
 (you can already open it). Works for a private group you cannot open yet.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
@@ -38,14 +35,11 @@ while a request is pending, or within 7 days of a decline, changes nothing and
 returns the current status.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
-		data, err := api.Post(cmd.Context(), "/groups/"+group+"/access_request", nil, "")
+		data, err := api.Post(cmd.Context(), "/groups/"+group+"/access_request", write(nil))
 		if err != nil {
 			return err
 		}
@@ -60,10 +54,7 @@ var accessRequestListCmd = &cobra.Command{
 	Long:    "List the group's pending access requests, oldest first. Admin-only.",
 	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
@@ -83,14 +74,11 @@ var accessRequestApproveCmd = &cobra.Command{
 	Long:  "Approve a pending request. Admin-only. The requester joins as an editor and is notified. Returns the refreshed group snapshot.",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		data, err := api.Post(cmd.Context(), "/groups/"+group+"/access_requests/"+args[0]+"/approval", nil, "")
+		data, err := api.Post(cmd.Context(), "/groups/"+group+"/access_requests/"+args[0]+"/approval", write(nil))
 		if err != nil {
 			return err
 		}
@@ -104,14 +92,11 @@ var accessRequestDeclineCmd = &cobra.Command{
 	Long:  "Decline a pending request. Admin-only. The requester is not notified and cannot ask again for 7 days.",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		if _, err := api.Post(cmd.Context(), "/groups/"+group+"/access_requests/"+args[0]+"/decline", nil, ""); err != nil {
+		if _, err := api.Post(cmd.Context(), "/groups/"+group+"/access_requests/"+args[0]+"/decline", write(nil)); err != nil {
 			return err
 		}
 		return printOK(map[string]any{"id": args[0], "declined": true}, "Access request declined")
@@ -120,5 +105,6 @@ var accessRequestDeclineCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(accessRequestCmd)
+	addIdempotencyFlag(accessRequestCreateCmd, accessRequestApproveCmd, accessRequestDeclineCmd)
 	accessRequestCmd.AddCommand(accessRequestStatusCmd, accessRequestCreateCmd, accessRequestListCmd, accessRequestApproveCmd, accessRequestDeclineCmd)
 }

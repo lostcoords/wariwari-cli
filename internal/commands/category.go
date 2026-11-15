@@ -7,9 +7,6 @@ var categoryCmd = &cobra.Command{
 	Short: "Manage group categories",
 }
 
-var categoryBody string
-var categoryBodyFile string
-
 var categoryListCmd = &cobra.Command{
 	Use:     "list [GROUP_TOKEN]",
 	Aliases: []string{"ls"},
@@ -18,10 +15,7 @@ var categoryListCmd = &cobra.Command{
 there is no categories list endpoint.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
@@ -38,18 +32,15 @@ var categoryCreateCmd = &cobra.Command{
 	Short: "Create a category from JSON",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
-		body, err := bodyFrom(categoryBody, categoryBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Post(cmd.Context(), "/groups/"+group+"/categories", body, "")
+		data, err := api.Post(cmd.Context(), "/groups/"+group+"/categories", write(body))
 		if err != nil {
 			return err
 		}
@@ -67,8 +58,10 @@ var categoryExampleCreateCmd = &cobra.Command{
 	Short: "Example payload for creating a category",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"name":  "Food",
-			"emoji": "🍜",
+			"token":    "4QfYk8nE2pRtVwXz7aBcDeFg",
+			"name":     "Food",
+			"emoji":    "🍜",
+			"position": 1,
 		}, "Category create example")
 	},
 }
@@ -94,18 +87,15 @@ snapshot. A stale value returns 409 CONFLICT with the fresh category under
 "current".`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		body, err := bodyFrom(categoryBody, categoryBodyFile)
+		body, err := commandData()
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/categories/"+args[0], body)
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/categories/"+args[0], write(body))
 		if err != nil {
 			return err
 		}
@@ -119,14 +109,15 @@ var categoryDeleteCmd = &cobra.Command{
 	Long:  guardedDeleteHelp,
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(optionalArg(args, 1))
+		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		data, err := api.DeleteRevision(cmd.Context(), "/groups/"+group+"/categories/"+args[0], lockVersion)
+		w, err := revisedWrite(cmd, nil, snapshotRecord(group, "groupCategories", args[0]))
+		if err != nil {
+			return err
+		}
+		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/categories/"+args[0], w)
 		if err != nil {
 			return err
 		}
@@ -136,11 +127,9 @@ var categoryDeleteCmd = &cobra.Command{
 
 func init() {
 	addLockVersionFlag(categoryDeleteCmd)
+	addDataFlags(categoryCreateCmd, categoryUpdateCmd)
+	addIdempotencyFlag(categoryCreateCmd, categoryUpdateCmd, categoryDeleteCmd)
 	rootCmd.AddCommand(categoryCmd)
 	categoryCmd.AddCommand(categoryListCmd, categoryCreateCmd, categoryUpdateCmd, categoryDeleteCmd, categoryExampleCmd)
 	categoryExampleCmd.AddCommand(categoryExampleCreateCmd, categoryExampleUpdateCmd)
-	categoryCreateCmd.Flags().StringVar(&categoryBody, "data", "", "JSON request body")
-	categoryCreateCmd.Flags().StringVar(&categoryBodyFile, "data-file", "", "Read JSON request body from file")
-	categoryUpdateCmd.Flags().StringVar(&categoryBody, "data", "", "JSON request body")
-	categoryUpdateCmd.Flags().StringVar(&categoryBodyFile, "data-file", "", "Read JSON request body from file")
 }

@@ -5,17 +5,15 @@ import "github.com/spf13/cobra"
 var balanceCmd = &cobra.Command{
 	Use:   "balance [GROUP_TOKEN]",
 	Short: "Show balances and suggested payments",
-	Long: `Show who owes what, derived from the group snapshot.
+	Long: `Show who owes what: netByCurrency (currency code -> participant token ->
+signed cents, positive means owed), suggestedPayments, and the spending
+totals, taken from the group snapshot.
 
-There is no balances endpoint: this reads GET /v1/groups/:group_token and pulls
-out netByCurrency (currency code -> participant token -> signed cents),
-suggestedPayments, and the spending totals.`,
+Settle a suggested payment with "wariwari payment create"; see how one
+member's balance adds up with "wariwari participant balance".`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		group, err := requireGroup(firstArg(args))
+		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
