@@ -80,9 +80,8 @@ wariwari auth login wari_xxxxxxxx
 WARIWARI_TOKEN=wari_xxxxxxxx wariwari group list
 ```
 
-A developer key can read and edit existing groups, including creating
-participants and transactions, but **cannot create a group**; `POST /v1/groups`
-is session-credential only and answers `403 ACCESS_DENIED`. Full access is
+A developer key can do everything the CLI offers, including creating groups
+(20 an hour). Full access is
 currently enabled, so developer keys have no monthly usage quota; short-term
 per-IP and per-credential rate limits still apply.
 
@@ -118,8 +117,9 @@ wariwari group list --archived --take 100
 wariwari group show GROUP_TOKEN          # the full snapshot
 wariwari group activity GROUP_TOKEN
 wariwari group stats GROUP_TOKEN --date-range this_month
-wariwari group fx-rate GROUP_TOKEN --from USD
+wariwari group fx-rate GROUP_TOKEN --from USD --date 2026-05-01
 wariwari group settings GROUP_TOKEN
+wariwari group notifications show GROUP_TOKEN
 wariwari balance GROUP_TOKEN
 wariwari participant list GROUP_TOKEN
 wariwari participant balance PARTICIPANT_TOKEN GROUP_TOKEN
@@ -133,7 +133,7 @@ wariwari transaction activity TRANSACTION_TOKEN GROUP_TOKEN
 invite link), `participants`,
 `groupCategories`, `transactions`, `netByCurrency`, `suggestedPayments`, and
 spending totals. `balance`, `participant list`, and `category list` read that
-same snapshot; the API has no separate endpoints for them.
+same snapshot; the API has no list endpoints for participants or categories.
 
 `participant balance` shows how one participant's balance adds up, transaction
 by transaction, in the group currency.
@@ -186,33 +186,48 @@ wariwari group list --take 100 --cursor eyJraW5kIjoia2V5c2V0In0 --json
 ## Writing
 
 Write commands accept a JSON body via `--data` or `--data-file`. All fields are
-camelCase, and every write returns the refreshed group snapshot.
+camelCase, and writes to a group's resources return the refreshed group
+snapshot. `wariwari <resource> example <action>` prints a template body.
 
 ```bash
 wariwari group create --idempotency-key "$(uuidgen)" \
-  --data '{"name":"Trip","icon":"🧳","currency":"JPY","participants":[{"name":"Ada"}]}'
+  --data '{"name":"Trip","icon":"🧳","currency":"JPY","participants":[{"name":"Ada","color":"#1F3A5F"}]}'
 wariwari group update GROUP_TOKEN --data '{"name":"Trip 2026","lockVersion":1}'
-wariwari participant create GROUP_TOKEN --data '{"token":"qm1mVhS7nyyF99vfPYwfF3nN","name":"Ada"}'
+wariwari participant create GROUP_TOKEN --data '{"name":"Ada","color":"#1F3A5F"}'
 wariwari participant update PARTICIPANT_TOKEN GROUP_TOKEN --data '{"name":"Ada","lockVersion":0}'
 wariwari participant delete PARTICIPANT_TOKEN GROUP_TOKEN --lock-version 0
-wariwari category create GROUP_TOKEN --data '{"name":"Food","emoji":"🍜"}'
+wariwari participant merge DUPLICATE_TOKEN GROUP_TOKEN --into KEEP_TOKEN
+wariwari participant move PARTICIPANT_TOKEN GROUP_TOKEN --position 1     # or --up / --down
+wariwari participant claim PARTICIPANT_TOKEN GROUP_TOKEN                 # "this one is me"
+wariwari participant unlink PARTICIPANT_TOKEN GROUP_TOKEN
+wariwari category create GROUP_TOKEN --data '{"name":"Food","emoji":"🍜","position":1}'
 wariwari category update CATEGORY_TOKEN GROUP_TOKEN --data '{"name":"Food","emoji":"🍜","lockVersion":0}'
 wariwari category delete CATEGORY_TOKEN GROUP_TOKEN --lock-version 0
 wariwari transaction create GROUP_TOKEN --data-file transaction-create.json
 wariwari transaction update TRANSACTION_TOKEN GROUP_TOKEN --data-file transaction-update.json
 wariwari transaction delete TRANSACTION_TOKEN GROUP_TOKEN --lock-version 2
+wariwari transaction bulk-edit GROUP_TOKEN --data '{"transactionTokens":["T1","T2"],"groupCategoryToken":"CAT"}'
+wariwari transaction bulk-delete GROUP_TOKEN --data '{"transactionTokens":["T1","T2"]}'
 wariwari payment create GROUP_TOKEN --data '{"fromToken":"FROM","toToken":"TO","amountCents":4000}'
 wariwari payment update PAYMENT_TOKEN GROUP_TOKEN --data '{"fromToken":"FROM","toToken":"TO","amountCents":4500,"date":"2026-05-24","lockVersion":0}'
 wariwari group settings update GROUP_TOKEN --data '{"visibility":"private_registered","lockVersion":3}'
 wariwari group archive GROUP_TOKEN
 wariwari group unarchive GROUP_TOKEN
+wariwari group dismiss GROUP_TOKEN                       # leave: hide it and unlink yourself
+wariwari group duplicate GROUP_TOKEN --include-members   # new group with the same categories
+wariwari group join GROUP_TOKEN                          # a public group, by its link
+wariwari group notifications mute GROUP_TOKEN
 wariwari group delete GROUP_TOKEN --lock-version 3
 wariwari account update --data '{"locale":"ja"}'
 ```
 
-Updates require `lockVersion` from the record you just read, and deletes take it
-as `--lock-version`. A stale value returns `409 CONFLICT`, usually with the
-fresh record under `current`. Re-apply your change on top of it and retry.
+Updates require `lockVersion` from the record you just read. Deletes, merges
+and moves take it as `--lock-version`; without the flag the CLI reads the
+current value first and acts on whatever is there. Bulk edits take a
+`lockVersions` map and fill in tokens you leave out the same way. A stale value
+returns `409 CONFLICT`, usually with the fresh record under `current`. Re-apply
+your change on top of it and retry. Retrying a delete that already went through
+succeeds again.
 
 `payment update` replaces the payment: resend `date` and the other fields you
 want to keep, or the date resets to today. `group settings update` changes
@@ -223,7 +238,10 @@ and roles of linked participants (`participants: [{token, membershipRole}]`).
 A transaction needs `description`, `amountCents`, `currency`, `splitType`,
 `date`, `paidByToken`, and `splits`. `splitType` is one of `equal`,
 `percentage`, `shares`, `amount`. With `equal`, the splits may omit
-`amountCents` and the server divides the amount evenly.
+`amountCents` and the server divides the amount evenly. Optional:
+`groupCategoryToken` (send `null` on update to clear it), `timeOfDay`
+(`HH:MM`), and `balanceCurrency` (the transaction currency keeps it in its own
+balance bucket).
 
 ```json
 {
@@ -242,16 +260,19 @@ A transaction needs `description`, `amountCents`, `currency`, `splitType`,
 }
 ```
 
-The optional 24-character base58 `token` makes participant and transaction
-creates safe to retry. Generate it once for the new resource and reuse the same
-token and body on retries; never invent tokens for existing participants or
+To retry any write safely, pass `--idempotency-key` with a UUID and reuse the
+same key and body: the server replays the first outcome for 90 days. A client
+`token` on a create names the new record; reusing one returns
+`409 DUPLICATE_TOKEN`. Never invent tokens for existing participants or
 categories.
 
 ## Sharing and access
 
 ```bash
-wariwari invitation create GROUP_TOKEN --role editor --expires-in 7d
+wariwari invitation create GROUP_TOKEN --role editor --expires-in 7d   # prints the url
+wariwari invitation list GROUP_TOKEN
 wariwari invitation revoke INVITATION_TOKEN GROUP_TOKEN
+wariwari invitation accept INVITATION_TOKEN GROUP_TOKEN
 wariwari access-request status GROUP_TOKEN    # your own request: none, pending, declined, viewable
 wariwari access-request create GROUP_TOKEN    # ask a private group's admins
 wariwari access-request list GROUP_TOKEN      # admins: pending requests
@@ -260,7 +281,7 @@ wariwari access-request decline ID GROUP_TOKEN
 ```
 
 A public group is shared with the snapshot's `shareUrl`; invitations are for
-private groups. Invitations and access-request reviews are admin-only.
+view-only and private groups. Invitations and access-request reviews are admin-only.
 
 ## Feedback
 
@@ -272,8 +293,8 @@ wariwari feedback "The CSV export is missing the category emoji"
 
 The CLI authenticates with a developer API key, and some routes accept only a
 first-party app session: listing and signing out sessions, sign-in identities,
-payment methods, device tokens, email change, account deletion, imports, and
-group creation. Use the app for those.
+payment methods, device tokens, email change, account deletion, and imports.
+Use the app for those.
 
 ## Errors
 
@@ -301,6 +322,7 @@ wariwari group example create --json
 wariwari participant example create --json
 wariwari category example create --json
 wariwari transaction example create --json
+wariwari transaction example bulk-edit --json
 wariwari payment example create --json
 ```
 
@@ -310,4 +332,5 @@ wariwari payment example create --json
 make build
 make test-unit
 make check
+make sync-spec   # refresh the vendored OpenAPI bundle the tests check against
 ```

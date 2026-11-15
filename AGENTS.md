@@ -47,14 +47,18 @@ Two carve-outs:
 | `search`                     | `GET /v1/search` (`q`)                                        |
 | `feedback`                   | `POST /v1/feedback`                                           |
 | `group list`                 | `GET /v1/groups` (`archived`, `take`, `cursor`)               |
-| `group create`               | `POST /v1/groups` (+ `Idempotency-Key`)                       |
+| `group create`               | `POST /v1/groups`                                             |
 | `group show` / `snapshot`    | `GET /v1/groups/:group_token`                                 |
 | `group update`               | `PATCH /v1/groups/:group_token`                               |
 | `group delete`               | `DELETE /v1/groups/:group_token` (+ expected revision)        |
 | `group activity`             | `GET /v1/groups/:group_token/activity`                        |
 | `group archive` / `unarchive`| `POST` / `DELETE /v1/groups/:group_token/archival`            |
+| `group dismiss`              | `POST /v1/groups/:group_token/dismissal`                      |
+| `group duplicate`            | `POST /v1/groups/:group_token/duplication`                    |
+| `group join`                 | `POST /v1/groups/:group_token/membership`                     |
+| `group notifications`        | `GET` / `PATCH /v1/groups/:g/notification_settings` (`muted`) |
 | `group stats`                | `GET /v1/groups/:group_token/stats` (filters below)           |
-| `group fx-rate`              | `GET /v1/groups/:group_token/fx_rate` (`from`)                |
+| `group fx-rate`              | `GET /v1/groups/:group_token/fx_rate` (`from`, `date`)        |
 | `group export`               | `GET /v1/groups/:group_token/csv_export` (`text/csv`)         |
 | `group settings`             | `GET /v1/groups/:group_token/settings`                        |
 | `group settings update`      | `PATCH /v1/groups/:group_token/settings`                      |
@@ -64,6 +68,10 @@ Two carve-outs:
 | `participant create`         | `POST /v1/groups/:group_token/participants`                   |
 | `participant update`         | `PATCH /v1/groups/:group_token/participants/:token`           |
 | `participant delete`         | `DELETE /v1/groups/:group_token/participants/:token` (+ rev)  |
+| `participant merge`          | `POST /v1/groups/:g/participants/:token/merge` (+ rev)        |
+| `participant move`           | `PATCH /v1/groups/:g/participants/:token/position` (+ rev)    |
+| `participant claim`          | `POST /v1/groups/:g/participants/:token/claim`                |
+| `participant unlink`         | `DELETE /v1/groups/:g/participants/:token/link`               |
 | `category list`              | `GET /v1/groups/:group_token` (derived)                       |
 | `category create`            | `POST /v1/groups/:group_token/categories`                     |
 | `category update`            | `PATCH /v1/groups/:group_token/categories/:token`             |
@@ -74,10 +82,14 @@ Two carve-outs:
 | `transaction update`         | `PATCH /v1/groups/:g/transactions/:transaction_token`         |
 | `transaction delete`         | `DELETE /v1/groups/:g/transactions/:transaction_token` (+ rev)|
 | `transaction activity`       | `GET /v1/groups/:g/transactions/:t/activity`                  |
+| `transaction bulk-edit`      | `POST /v1/groups/:g/transaction_bulk_edit` (`lockVersions`)   |
+| `transaction bulk-delete`    | `DELETE /v1/groups/:g/transaction_bulk_edit` (`lockVersions`) |
 | `payment create`             | `POST /v1/groups/:g/payments`                                 |
 | `payment update`             | `PATCH /v1/groups/:g/payments/:payment_token`                 |
+| `invitation list`            | `GET /v1/groups/:g/invitations`                               |
 | `invitation create`          | `POST /v1/groups/:g/invitations`                              |
 | `invitation revoke`          | `DELETE /v1/groups/:g/invitations/:invitation_token`          |
+| `invitation accept`          | `POST /v1/groups/:g/invitations/:invitation_token/accept`     |
 | `access-request status`      | `GET /v1/groups/:g/access_request`                            |
 | `access-request create`      | `POST /v1/groups/:g/access_request`                           |
 | `access-request list`        | `GET /v1/groups/:g/access_requests`                           |
@@ -123,8 +135,7 @@ The CLI authenticates with a developer API key (`wari_…`), and these routes
 answer it with `403 ACCESS_DENIED`, so the CLI does not wrap them:
 `/v1/account/sessions*`, `/v1/account/identities*`,
 `/v1/account/payment_methods*`, `/v1/account/device_tokens*`,
-`/v1/account/email_change`, `DELETE /v1/account`, the imports, and
-`POST /v1/groups`.
+`/v1/account/email_change`, `DELETE /v1/account`, and the imports.
 
 Updates are **PATCH**, never PUT. There is no PUT anywhere in the API, and
 `client.Client` has no `Put` method.
@@ -140,14 +151,16 @@ Updates are **PATCH**, never PUT. There is no PUT anywhere in the API, and
   `400 VALIDATION_FAILED`; a stale value is `409 CONFLICT`, with the fresh record
   under `current` for groups, categories, transactions and participants
   (`current` is absent for other records).
-- **Deletes are guarded too.** Group, participant, category and transaction
-  deletes need the record's `lockVersion` in the `WariWari-Expected-Revision`
-  header (`--lock-version`); `client.DeleteRevision` sends it.
-- **`POST /v1/groups` is session-credential only.** A `wari_` developer key gets
-  `403 ACCESS_DENIED`.
-- **The CLI sends `Idempotency-Key` on `group create` only.** The API accepts it
-  on most group writes, but participant, transaction and payment creates are
-  already retry-safe through client-supplied tokens.
+- **Deletes, merges and moves are guarded too.** They carry the target's
+  `lockVersion` in the `WariWari-Expected-Revision` header
+  (`client.Write.ExpectedRevision`). `revisedWrite` sends `--lock-version` when
+  given, otherwise reads the record first; a record the read cannot find goes
+  at revision 0, so the server answers (an already deleted record succeeds
+  again, an unknown one is 404). Bulk edits carry a `lockVersions` map instead.
+- **`POST /v1/groups` works with developer keys**, 20 groups an hour.
+- **`--idempotency-key` exists exactly where the operation declares
+  `Idempotency-Key`** (most group writes; not invitations, notification
+  settings, participant unlink or account update). `spec_test.go` enforces it.
 - **Errors are RFC 9457 Problem Details**: `type`, `title`, `status`, `detail`,
   `code`, `instance`, plus `errors` (validation) and `current` (409). Switch on
   `code`; `VALIDATION_FAILED` is a `400`, not a `422`. A `429` is
@@ -194,7 +207,14 @@ stay `wariwari_<version>_<os>_<arch>.tar.gz`. Both honour
 ```bash
 make build       # go build -o bin/wariwari ./cmd/wariwari
 make check       # gofmt -l, go vet, go test ./internal/...
+make sync-spec   # copy ../wariwari/openapi/dist/wariwari.bundled.yaml into testdata
 ```
 
-`internal/commands/contract_test.go` pins the command↔route table above. Update
-it whenever a route moves.
+`contract_test.go` lists every command with the request it ends with and the
+spec `operationId` it calls; add a row for each new command. `spec_test.go`
+checks the rows against the vendored bundle
+(`internal/commands/testdata/wariwari.openapi.yaml`): method, path template,
+required headers, the `--idempotency-key` flag, and that every public operation
+has a command. It also fails when the server checkout beside this repo changed
+an operation since the vendored copy; run `make sync-spec` and update the
+commands.

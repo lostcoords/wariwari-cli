@@ -33,8 +33,8 @@ wariwari <command> --json
    returns metadata, `shareUrl` (the invite link), `participants`,
    `groupCategories`, `transactions`, `netByCurrency`, `suggestedPayments` and
    spending totals in one payload.
-   There are no separate participants, categories, or balances endpoints — the
-   `participant list`, `category list`, and `balance` commands all read this
+   There are no participants or categories list endpoints; the
+   `participant list`, `category list`, and `balance` commands read this
    snapshot for you.
 
 Maps keyed by data keep their keys verbatim: `fxRates`, `spendingByCurrency`
@@ -56,15 +56,14 @@ there is no API route to list or mint one. `wariwari auth login` with no
 argument runs a browser login instead: it prints a one-time code and waits for
 a person to approve it in their browser. Use it only when the user is at the
 terminal and asks for it; otherwise ask them for a key.
-Developer API keys can create participants, categories, transactions, and
-payments inside an existing editable group. Group creation remains
-session-credential only. Full access is currently enabled for every account and
-group, so developer keys have no monthly usage quota. Short-term per-IP and
+Developer API keys can do everything below, including creating groups (20 an
+hour). Full access is currently enabled for every account and group, so
+developer keys have no monthly usage quota. Short-term per-IP and
 per-credential rate limits still apply.
 
 Developer keys cannot reach session-only routes (sessions, sign-in identities,
-payment methods, device tokens, email change, account deletion, imports, group
-creation); the CLI has no commands for them. Ask the user to do those in the app.
+payment methods, device tokens, email change, account deletion, imports); the
+CLI has no commands for them. Ask the user to do those in the app.
 
 If a command or field in this skill is missing from the CLI, run
 `wariwari upgrade --check`; `wariwari upgrade` installs the latest release and
@@ -91,8 +90,10 @@ wariwari group list --archived --take 100 --json
 wariwari group show GROUP_TOKEN --json          # the full snapshot
 wariwari group activity GROUP_TOKEN --json
 wariwari group stats GROUP_TOKEN --date-range this_month --json
-wariwari group fx-rate GROUP_TOKEN --from USD --json
+wariwari group fx-rate GROUP_TOKEN --from USD --date 2026-05-23 --json
 wariwari group settings GROUP_TOKEN --json
+wariwari group notifications show GROUP_TOKEN --json
+wariwari invitation list GROUP_TOKEN --json
 wariwari group export GROUP_TOKEN --output trip.csv
 wariwari balance GROUP_TOKEN --json
 wariwari participant balance PARTICIPANT_TOKEN GROUP_TOKEN --json
@@ -165,8 +166,9 @@ transactions are kept in another currency and left out.
   (`all_time`, `this_month`, `last_month`, `last_3_months`, `last_6_months`,
   `last_12_weeks`, `this_year`), `--participant TOKEN`, `--category TOKEN`,
   `--month YYYY-MM`, `--week DATE`, or `--date DATE`.
-- `group fx-rate --from USD` returns `rate`, a decimal string, from that
-  currency to the group currency.
+- `group fx-rate --from USD [--date DATE]` returns `rate`, a decimal string,
+  from that currency to the group currency on that day (default today), and
+  `provisional` while the day's rate is not yet published.
 - `group export` writes the group's `wariwari.v1` CSV to stdout, or to
   `--output FILE`. It needs settings access.
 
@@ -178,20 +180,35 @@ follow-up read.
 
 ```bash
 wariwari group update GROUP_TOKEN --data '{"name":"Trip 2026","lockVersion":1}' --json
-wariwari participant create GROUP_TOKEN --data '{"token":"qm1mVhS7nyyF99vfPYwfF3nN","name":"Ada"}' --json
+wariwari participant create GROUP_TOKEN --data '{"name":"Ada","color":"#1F3A5F"}' --json
 wariwari participant update PARTICIPANT_TOKEN GROUP_TOKEN --data '{"name":"Ada Lovelace","lockVersion":0}' --json
 wariwari participant delete PARTICIPANT_TOKEN GROUP_TOKEN --lock-version 0 --json
-wariwari category create GROUP_TOKEN --data '{"name":"Food","emoji":"🍜"}' --json
+wariwari participant merge DUPLICATE_TOKEN GROUP_TOKEN --into KEEP_TOKEN --json
+wariwari participant move PARTICIPANT_TOKEN GROUP_TOKEN --position 1 --json   # or --up / --down
+wariwari participant claim PARTICIPANT_TOKEN GROUP_TOKEN --json    # "this one is me"
+wariwari participant unlink PARTICIPANT_TOKEN GROUP_TOKEN --json
+wariwari category create GROUP_TOKEN --data '{"name":"Food","emoji":"🍜","position":1}' --json
 wariwari category update CATEGORY_TOKEN GROUP_TOKEN --data '{"name":"Food","emoji":"🍜","lockVersion":0}' --json
 wariwari category delete CATEGORY_TOKEN GROUP_TOKEN --lock-version 0 --json
 wariwari transaction create GROUP_TOKEN --data-file transaction-create.json --json
 wariwari transaction update TRANSACTION_TOKEN GROUP_TOKEN --data-file transaction-update.json --json
 wariwari transaction delete TRANSACTION_TOKEN GROUP_TOKEN --lock-version 2 --json
+wariwari transaction bulk-edit GROUP_TOKEN --data '{"transactionTokens":["T1","T2"],"groupCategoryToken":"C"}' --json
+wariwari transaction bulk-delete GROUP_TOKEN --data '{"transactionTokens":["T1","T2"]}' --json
 wariwari group settings update GROUP_TOKEN --data '{"currency":"EUR","lockVersion":3}' --json
 wariwari group archive GROUP_TOKEN --json       # only hides it for you
+wariwari group dismiss GROUP_TOKEN --json       # leave it: hides it and unlinks you
+wariwari group duplicate GROUP_TOKEN --include-members --json   # new group, same categories
+wariwari group notifications mute GROUP_TOKEN --json
 wariwari group delete GROUP_TOKEN --lock-version 3 --json   # deletes it for everyone
 wariwari account update --data '{"locale":"ja"}' --json
 ```
+
+Confirm with the user before any delete, merge or bulk edit. `bulk-edit`
+re-assigns `paidByToken`, `groupCategoryToken`, `splitType` with
+`splitParticipantTokens` (plus `splitPercentages` or `splitShares`), `date` or
+`timeOfDay` across `transactionTokens`; it is behind a feature flag and
+answers `404` while the flag is off for the account.
 
 `account update` takes a flat, partial body: `name`, `avatarColor`,
 `preferredCurrency`, `locale` (`en`, `es`, `ja`), `marketingOptIn`,
@@ -208,7 +225,11 @@ categories addressed by token (`"categories": [{"token", "name", "emoji",
 ### lockVersion is required on every update and delete
 
 Send the `lockVersion` from the record you just read: in the body for updates,
-as `--lock-version` for deletes. If someone else wrote first, the API returns
+as `--lock-version` for deletes, merges and moves (bulk edits take a
+`lockVersions` map of token to version). Without `--lock-version` the CLI reads
+the current value first and acts on whatever is there, so pass it whenever you
+decided based on what you read. Retrying a delete that already succeeded
+succeeds again. If someone else wrote first, the API returns
 `409 CONFLICT` and, for groups, categories, transactions and participants, puts
 the fresh record under `current` in the error body:
 
@@ -227,28 +248,31 @@ absent), re-applying your change on top of it, and retrying with the newer
 
 ### Creating a group
 
-Group creation is **session-credential only**. A developer API key (`wari_…`)
-gets `403 ACCESS_DENIED`. If that happens, ask the user to create the group in
-the app and give you its token.
-
 ```bash
 wariwari group create --idempotency-key "$(uuidgen)" --json \
-  --data '{"name":"Trip","icon":"🧳","currency":"JPY","participants":[{"name":"Ada"},{"name":"Grace"}]}'
+  --data '{"name":"Trip","icon":"🧳","currency":"JPY","participants":[{"name":"Ada","color":"#1F3A5F"},{"name":"Grace"}]}'
 ```
 
-`name`, `icon`, and at least one participant are required. The
-`Idempotency-Key` makes a retry safe for 90 days; reusing the key with a
-different body returns `409 IDEMPOTENCY_KEY_IN_USE`.
+`name`, `icon`, and at least one participant are required. Optional:
+`creatorParticipantToken` (which participant is the user; they become its
+admin), `categories` (`token`, `emoji`, `name`, `position`) to replace the
+defaults, and client `token`s. A developer key may create 20 groups an hour.
+
+### Retrying a write
+
+Every write that the API makes replay-safe takes `--idempotency-key`. Pass a
+fresh UUID, and reuse the same key and body when retrying: the server replays
+the first outcome for 90 days. Reusing the key with a different body returns
+`409 IDEMPOTENCY_KEY_IN_USE`.
 
 ## Settle-up workflow
 
 1. `wariwari balance GROUP_TOKEN --json` and read `suggestedPayments`.
-2. For each payment the user confirms, record it with a fresh 24-character
-   base58 `token`:
+2. For each payment the user confirms, record it with a fresh
+   `--idempotency-key`:
 
 ```bash
-wariwari payment create GROUP_TOKEN --json --data '{
-  "token": "5xKpQ2mNbV8cRtY3wZ9aHfJd",
+wariwari payment create GROUP_TOKEN --idempotency-key "$KEY" --json --data '{
   "fromToken": "8mPNkR4qQXtLbJR5CcxT6yWa",
   "toToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
   "amountCents": 4000,
@@ -265,10 +289,14 @@ or the date resets to today.
 ## Sharing and access workflow
 
 - Public group: give people the snapshot's `shareUrl`.
-- Private group: `wariwari invitation create GROUP_TOKEN --role editor
-  --expires-in 7d --json` returns an invitation `token`; `invitation revoke
-  INVITATION_TOKEN GROUP_TOKEN` disables it. `--role` is `read_only`, `editor`,
+- View-only or private group: `wariwari invitation create GROUP_TOKEN --role
+  editor --expires-in 7d --json` returns the invitation's `url` and `token`;
+  `invitation list GROUP_TOKEN` shows the ones still usable; `invitation revoke
+  INVITATION_TOKEN GROUP_TOKEN` disables one. `--role` is `read_only`, `editor`,
   or `admin`; omit `--expires-in` for a link that never expires. Admin-only.
+- Accepting an invitation: `wariwari invitation accept INVITATION_TOKEN
+  GROUP_TOKEN`. Joining a public group by its link: `wariwari group join
+  GROUP_TOKEN`.
 - Joining someone else's private group: `wariwari access-request status
   GROUP_TOKEN` (`none`, `pending`, `declined`, `viewable`), then
   `access-request create GROUP_TOKEN`. Asking again while pending, or within 7
@@ -284,37 +312,40 @@ or the date resets to today.
 2. Read current state: `wariwari group show GROUP_TOKEN --json`.
 3. Take existing participant tokens from `participants` and category tokens
    from `groupCategories`. **Never invent a token for an existing resource.**
-4. Generate one new 24-character base58 transaction `token`. Keep it with the
-   request and reuse the identical token and body if the create must be retried.
+4. Generate a UUID for `--idempotency-key`. Reuse the identical key and body
+   if the create must be retried.
 5. Pick `kind`: `expense` for spending, `payment` for a settle-up transfer.
 6. Pick `splitType`: `equal`, `percentage`, `shares`, or `amount`.
 7. Build `splits` so the `amountCents` values sum to the transaction's
    `amountCents`. For `equal`, you may omit `amountCents` from every split and
-   the server divides the amount evenly.
+   the server divides the amount evenly. Optional: `groupCategoryToken`,
+   `timeOfDay` (`HH:MM`), and `balanceCurrency` (send the transaction currency
+   to keep a foreign expense in its own balance bucket instead of converting).
 8. Create it, then read `netByCurrency` / `suggestedPayments` from the returned
    snapshot to report the new balances.
 
 ```bash
-wariwari transaction create GROUP_TOKEN --json --data '{
-  "token": "9AHTHuAGT7U2CpSfktrfUAYA",
+wariwari transaction create GROUP_TOKEN --idempotency-key "$KEY" --json --data '{
   "kind": "expense",
   "description": "Team dinner",
+  "groupCategoryToken": "4QfYk8nE2pRtVwXz7aBcDeFg",
   "amountCents": 12000,
   "currency": "JPY",
   "splitType": "equal",
   "date": "2026-05-23",
+  "timeOfDay": "19:30",
   "paidByToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
   "splits": [
-    {"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj", "amountCents": 4000},
-    {"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa", "amountCents": 4000},
-    {"participantToken": "9nQPmS5rRYuMcKS6DdyU7zXb", "amountCents": 4000}
+    {"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj"},
+    {"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa"},
+    {"participantToken": "9nQPmS5rRYuMcKS6DdyU7zXb"}
   ]
 }'
 ```
 
 To edit: `wariwari transaction show TOKEN GROUP_TOKEN --json`, then send the
 changed fields plus that record's `lockVersion`. Sending `splits` replaces all
-existing splits.
+existing splits; `"groupCategoryToken": null` clears the category.
 
 ## Errors
 
@@ -323,13 +354,14 @@ Failures are RFC 9457 Problem Details. Switch on `code`, show `detail`:
 | Code                                              | Status | What to do                                          |
 | ------------------------------------------------- | ------ | --------------------------------------------------- |
 | `AUTH_CREDENTIALS_REQUIRED` / `AUTH_CREDENTIALS_INVALID` / `AUTH_CREDENTIALS_EXPIRED` | 401 | Ask for a key and run `wariwari auth login wari_...`. |
-| `ACCESS_DENIED`                                   | 403    | Session-only action (e.g. creating a group).        |
+| `ACCESS_DENIED`                                   | 403    | Session-only action the key cannot do.              |
 | `INSUFFICIENT_PERMISSIONS`                        | 403    | No edit access, or an admin-only action.            |
 | `NOT_FOUND`                                       | 404    | Wrong token, or the record was deleted.             |
 | `INVALID_REQUEST`                                 | 400    | Malformed date, cursor, or body.                    |
 | `VALIDATION_FAILED`                               | 400    | Read the `errors` map (camelCase field names).      |
 | `CONFLICT`                                        | 409    | Stale `lockVersion` — reconcile against `current`.  |
 | `IDEMPOTENCY_KEY_IN_USE`                          | 409    | Same key, different body. Use a fresh key.          |
+| `DUPLICATE_TOKEN`                                 | 409    | Client token already used. Read the snapshot.       |
 | `RATE_LIMIT_EXCEEDED`                             | 429    | Back off for `retryAfter` seconds.                  |
 | `QUOTA_EXCEEDED`                                  | 429    | Monthly key quota used up. Tell the user.           |
 | `IDEMPOTENCY_IN_PROGRESS`                         | 503    | A concurrent retry is running. Wait and retry.      |
@@ -348,6 +380,7 @@ wariwari category example create --json
 wariwari category example update --json
 wariwari transaction example create --json
 wariwari transaction example update --json
+wariwari transaction example bulk-edit --json
 wariwari payment example create --json
 wariwari payment example update --json
 ```
