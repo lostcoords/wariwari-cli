@@ -80,10 +80,12 @@ wariwari auth login wari_xxxxxxxx
 WARIWARI_TOKEN=wari_xxxxxxxx wariwari group list
 ```
 
-A developer key can do everything the CLI offers, including creating groups
-(20 an hour). Full access is
-currently enabled, so developer keys have no monthly usage quota; short-term
-per-IP and per-credential rate limits still apply.
+On a Pro account (lifetime, ¥980) a developer key can do everything the CLI
+offers, including creating groups (20 an hour), with no monthly quota. On a
+free account the key only reads, 50 calls a month; writes answer
+`403 PRO_REQUIRED` and the CLI prints where to upgrade. Short-term per-IP and
+per-credential rate limits apply either way. `wariwari account show` says
+whether the account is Pro.
 
 ## Configuration
 
@@ -265,6 +267,27 @@ same key and body: the server replays the first outcome for 90 days. A client
 `token` on a create names the new record; reusing one returns
 `409 DUPLICATE_TOKEN`. Never invent tokens for existing participants or
 categories.
+
+## Pro group features
+
+Reminders, recurring expenses and receipt photos need a Pro group, one where a
+linked member holds Pro (`pro` on the group snapshot).
+
+```bash
+wariwari remind GROUP_TOKEN                                   # everyone who owes money
+wariwari remind GROUP_TOKEN --participant PARTICIPANT_TOKEN
+wariwari reminder schedule weekly GROUP_TOKEN --weekday mon   # or: monthly --day 25, off
+wariwari recurring list GROUP_TOKEN
+wariwari recurring create GROUP_TOKEN --data-file rent.json --every monthly --starts 2026-12-01
+wariwari recurring update RECURRING_TOKEN GROUP_TOKEN --interval 2
+wariwari recurring delete RECURRING_TOKEN GROUP_TOKEN
+wariwari transaction receipt upload TRANSACTION_TOKEN receipt.jpg GROUP_TOKEN
+wariwari transaction receipt delete TRANSACTION_TOKEN GROUP_TOKEN
+```
+
+A recurring expense takes the expense fields of `transaction create` as JSON,
+without `date`; `--every weekly|monthly|yearly`, `--interval N` and `--starts`
+set the schedule. `wariwari recurring example create` prints a template.
 
 ## Sharing and access
 

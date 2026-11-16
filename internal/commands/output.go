@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
+	"time"
 
 	"github.com/itchyny/gojq"
 	"github.com/lostcoords/wariwari-cli/internal/client"
@@ -91,9 +93,31 @@ func printErr(err error) {
 			fmt.Fprintln(errOut, "  Re-read the record and retry with the lockVersion from `current`.")
 		case apiErr.Code() == "CONFLICT":
 			fmt.Fprintln(errOut, "  Re-read the record and retry with its latest lockVersion.")
+		case apiErr.Code() == "PRO_REQUIRED":
+			fmt.Fprintln(errOut, "  This is a Pro feature. Pro is ¥980, paid once, and lasts for life.")
+			if url, _ := apiErr.Body["upgradeUrl"].(string); url != "" {
+				fmt.Fprintf(errOut, "  Upgrade at %s\n", url)
+			}
+		case apiErr.Code() == "QUOTA_EXCEEDED":
+			fmt.Fprintln(errOut, "  A free account's API key gets 50 read calls a month, and writes need Pro (¥980, paid once).")
+			if wait, err := strconv.Atoi(apiErr.RetryAfter); err == nil {
+				fmt.Fprintf(errOut, "  The quota resets in %s.\n", roughDuration(time.Duration(wait)*time.Second))
+			}
 		case apiErr.RetryAfter != "":
 			fmt.Fprintf(errOut, "  Retry after %s seconds.\n", apiErr.RetryAfter)
 		}
+	}
+}
+
+// roughDuration reads a monthly quota's Retry-After as days or hours.
+func roughDuration(d time.Duration) string {
+	switch {
+	case d >= 48*time.Hour:
+		return fmt.Sprintf("%d days", int(d.Hours()/24))
+	case d >= 2*time.Hour:
+		return fmt.Sprintf("%d hours", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%d minutes", int(d.Minutes())+1)
 	}
 }
 
@@ -187,7 +211,7 @@ func jsonShape(v any) (any, error) {
 
 // collectionKeys are the camelCase array fields the API nests rows under, in
 // the order --count and --ids-only should prefer them.
-var collectionKeys = []string{"groups", "transactions", "participants", "groupCategories", "activity", "suggestedPayments", "accessRequests"}
+var collectionKeys = []string{"groups", "transactions", "participants", "groupCategories", "activity", "suggestedPayments", "accessRequests", "recurringExpenses", "reminders"}
 
 func countData(v any) int {
 	switch data := v.(type) {

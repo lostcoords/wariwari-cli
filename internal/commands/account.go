@@ -28,7 +28,7 @@ func runAccountShow(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return printOK(data, "Account")
+	return printOK(data, proSummary("Account", data))
 }
 
 var accountUpdateCmd = &cobra.Command{
@@ -53,6 +53,21 @@ accessRequested, accessApproved). Returns the updated account.`,
 		}
 		return printOK(data, "Account updated")
 	},
+}
+
+// proSummary marks a record whose `pro` field is set, so a human reading the
+// envelope sees the plan without scanning the payload.
+func proSummary(summary string, data any) string {
+	record, _ := data.(map[string]any)
+	pro, ok := record["pro"].(bool)
+	switch {
+	case !ok:
+		return summary
+	case pro:
+		return summary + " (Pro)"
+	default:
+		return summary + " (free)"
+	}
 }
 
 func init() {

@@ -20,7 +20,8 @@ func TestEmbeddedSkillDocumentsCurrentContract(t *testing.T) {
 	for _, want := range []string{
 		"Positive means that participant is owed money; negative means they owe.",
 		"Transaction reads always include `timeOfDay`, but it can be `null`",
-		"developer keys have no monthly usage quota",
+		"On a free account the key only reads: 50 calls a month",
+		"`PRO_REQUIRED`",
 		"`AUTH_CREDENTIALS_EXPIRED`",
 		"`INTERNAL_SERVER_EXCEPTION`",
 		"`QUOTA_EXCEEDED`",
@@ -30,8 +31,8 @@ func TestEmbeddedSkillDocumentsCurrentContract(t *testing.T) {
 			t.Fatalf("embedded skill is missing %q", want)
 		}
 	}
-	if strings.Contains(skill, "free key quota is 50 calls/month") {
-		t.Fatal("embedded skill still documents the inactive monthly quota")
+	if strings.Contains(skill, "no monthly usage quota") {
+		t.Fatal("embedded skill still says free keys have no quota")
 	}
 }
 

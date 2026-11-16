@@ -30,11 +30,12 @@ info:
     `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` describe
     the per-minute bucket the request was counted against.
 
-    Full access is currently enabled for every account and group, so developer
-    API keys have no monthly usage quota. Short-term per-IP and per-credential
-    rate limits still apply. When quotas are on, a metered key's responses
-    carry `X-Quota-Limit`, `X-Quota-Remaining`, and `X-Quota-Reset`, and an
-    exhausted quota returns `429` with `QUOTA_EXCEEDED`.
+    A developer API key on a free account reads only: 50 calls a month, and
+    any write returns `403` with `PRO_REQUIRED` and an `upgradeUrl`. Its
+    responses carry `X-Quota-Limit`, `X-Quota-Remaining`, and `X-Quota-Reset`,
+    and an exhausted quota returns `429` with `QUOTA_EXCEEDED`. On a Pro
+    account (lifetime, ¥980) keys read and write without a monthly quota.
+    Short-term per-IP and per-credential rate limits apply either way.
 
     Updates use optimistic locking. Send the latest `lockVersion` from the
     resource you are updating. Stale versions return `409 CONFLICT` with the
@@ -71,6 +72,12 @@ tags:
   - name: payments
     x-displayName: Payments
     description: Settlements recorded between two participants.
+  - name: reminders
+    x-displayName: Reminders
+    description: Reminding members who owe money. Pro groups only.
+  - name: recurring_expenses
+    x-displayName: Recurring Expenses
+    description: Expenses posted on a schedule. Pro groups only.
   - name: invitations
     x-displayName: Invitations & Membership
     description: Invite links for private groups and joining public groups.
@@ -289,6 +296,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -438,9 +447,6 @@ paths:
       summary: List group activity
       description: |
         Returns transaction activity for the group, newest first.
-
-        History older than one month is omitted unless the group has extended
-        activity history (a premium sponsor, or full access while it is enabled).
       parameters:
         - name: take
           in: query
@@ -1033,9 +1039,6 @@ paths:
       summary: List transaction activity
       description: |
         Returns transaction activity, newest first.
-
-        History older than one month is omitted unless the group has extended
-        activity history (a premium sponsor, or full access while it is enabled).
       parameters:
         - name: take
           in: query
@@ -1063,6 +1066,70 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/transactions/{transaction_token}/receipt_photo:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/TransactionToken'
+    put:
+      tags:
+        - transactions
+      operationId: updateReceiptPhoto
+      summary: Attach or replace an expense's receipt photo
+      description: |
+        Stores one photo of the receipt for an expense, replacing any earlier one.
+        Images are re-encoded on upload. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReceiptPhotoUpload'
+      responses:
+        '200':
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptPhoto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - transactions
+      operationId: deleteReceiptPhoto
+      summary: Remove an expense's receipt photo
+      description: Deletes the photo. Works without Pro, so a group that lost Pro can still clean up.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '413':
@@ -1292,6 +1359,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '413':
@@ -1321,6 +1390,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1349,6 +1420,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1380,6 +1453,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1427,6 +1502,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1589,6 +1666,275 @@ paths:
             text/csv:
               schema:
                 type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/reminder_schedule:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    patch:
+      tags:
+        - reminders
+      operationId: updateReminderSchedule
+      summary: Turn on or change a group's balance reminders
+      description: |
+        Sets when wariwari reminds members who owe money. Reminders are off
+        until a group has a schedule. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReminderScheduleUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReminderSchedule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - reminders
+      operationId: deleteReminderSchedule
+      summary: Turn off a group's balance reminders
+      description: Removes the group's reminder schedule. Removing one that is already off succeeds.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/reminders:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    post:
+      tags:
+        - reminders
+      operationId: createReminder
+      summary: Remind a member of what they owe
+      description: |
+        Sends one member a reminder of their current balance. A member already
+        reminded recently is not reminded again (429 `RATE_LIMIT_EXCEEDED`). Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BalanceReminderCreate'
+      responses:
+        '201':
+          description: Sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceReminder'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/recurring_expenses:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      tags:
+        - recurring_expenses
+      operationId: listRecurringExpenses
+      x-wariwari-unpaginated-ok: Bounded set — a group holds a handful of schedules.
+      summary: List a group's recurring expenses
+      description: Lists the group's recurring expense schedules, paused ones included.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringExpenseList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - recurring_expenses
+      operationId: createRecurringExpense
+      summary: Create a recurring expense
+      description: |
+        Schedules an expense that wariwari posts on every occurrence. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecurringExpenseCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringExpense'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/recurring_expenses/{recurring_expense_token}:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/RecurringExpenseToken'
+    get:
+      tags:
+        - recurring_expenses
+      operationId: showRecurringExpense
+      summary: Show a recurring expense
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringExpense'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - recurring_expenses
+      operationId: updateRecurringExpense
+      summary: Update a recurring expense
+      description: |
+        Changes a schedule. Expenses it already posted stay as they are. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecurringExpenseUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringExpense'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - recurring_expenses
+      operationId: deleteRecurringExpense
+      summary: Delete a recurring expense
+      description: Stops the schedule. Expenses it already posted stay in the group.
+      parameters:
+        - $ref: '#/components/parameters/MutationOperationId'
+      responses:
+        '204':
+          description: Deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2046,6 +2392,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '413':
@@ -2160,6 +2508,8 @@ paths:
                 $ref: '#/components/schemas/AccessRequestStatus'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -2341,6 +2691,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '429':
@@ -2376,6 +2728,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '429':
@@ -3105,6 +3459,7 @@ components:
         - name
         - icon
         - currency
+        - pro
         - fxRates
         - lockVersion
         - createdAt
@@ -3126,6 +3481,11 @@ components:
           allOf:
             - $ref: '#/components/schemas/Currency'
           description: Base currency for totals and balances (ISO-4217).
+        pro:
+          type: boolean
+          description: |
+            True while at least one linked member holds Pro. Attachments, receipt
+            photos, reminders and recurring expenses need a Pro group.
         fxRates:
           type: object
           description: |
@@ -3454,6 +3814,29 @@ components:
           additionalProperties:
             type: integer
             minimum: 0
+    Error403:
+      description: |
+        Forbidden — the request is authenticated, but the caller is not allowed
+        to access this resource or perform this action.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ErrorBase'
+        - type: object
+          properties:
+            status:
+              type: integer
+              enum:
+                - 403
+            code:
+              type: string
+              enum:
+                - ACCESS_DENIED
+                - INSUFFICIENT_PERMISSIONS
+                - PRO_REQUIRED
+            upgradeUrl:
+              type: string
+              format: uri
+              description: Present with `PRO_REQUIRED`. Where a person buys lifetime Pro.
     Error404:
       description: Not Found — resource missing or not visible from this request.
       unevaluatedProperties: false
@@ -3553,24 +3936,6 @@ components:
                 - $ref: '#/components/schemas/Transaction'
                 - $ref: '#/components/schemas/Participant'
                 - $ref: '#/components/schemas/PaymentMethod'
-    Error403:
-      description: |
-        Forbidden — the request is authenticated, but the caller is not allowed
-        to access this resource or perform this action.
-      unevaluatedProperties: false
-      allOf:
-        - $ref: '#/components/schemas/ErrorBase'
-        - type: object
-          properties:
-            status:
-              type: integer
-              enum:
-                - 403
-            code:
-              type: string
-              enum:
-                - ACCESS_DENIED
-                - INSUFFICIENT_PERMISSIONS
     GroupUpdate:
       type: object
       additionalProperties: false
@@ -3991,6 +4356,38 @@ components:
           type: integer
           minimum: 0
           description: Latest lock version from the transaction being updated.
+    ReceiptPhotoUpload:
+      type: object
+      additionalProperties: false
+      required:
+        - photo
+      properties:
+        photo:
+          type: string
+          format: binary
+          description: A JPEG, PNG, WebP or HEIC image of the receipt.
+    ReceiptPhoto:
+      type: object
+      additionalProperties: false
+      required:
+        - url
+        - contentType
+        - byteSize
+        - createdAt
+      description: The one receipt photo stored for an expense.
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Short-lived link to the stored image.
+        contentType:
+          type: string
+        byteSize:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
     BulkEditInput:
       type: object
       additionalProperties: false
@@ -4445,6 +4842,339 @@ components:
               $ref: '#/components/schemas/StatsDelta'
             topCategory:
               $ref: '#/components/schemas/StatsDelta'
+    ReminderScheduleUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - cadence
+      properties:
+        cadence:
+          type: string
+          enum:
+            - weekly
+            - monthly
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Required for `weekly`; 0 = Sunday.
+        day:
+          type: integer
+          minimum: 1
+          maximum: 28
+          description: Required for `monthly`.
+    ReminderSchedule:
+      type: object
+      additionalProperties: false
+      required:
+        - cadence
+        - weekday
+        - day
+        - updatedAt
+      description: When a group's members who owe money get reminded.
+      properties:
+        cadence:
+          type: string
+          enum:
+            - weekly
+            - monthly
+        weekday:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+          maximum: 6
+          description: Day of the week for `weekly`, 0 = Sunday. `null` for `monthly`.
+        day:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 28
+          description: Day of the month for `monthly`. `null` for `weekly`.
+        updatedAt:
+          type: string
+          format: date-time
+    BalanceReminderCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - participantToken
+      properties:
+        participantToken:
+          $ref: '#/components/schemas/Token'
+    BalanceReminder:
+      type: object
+      additionalProperties: false
+      required:
+        - participantToken
+        - channel
+        - amountCents
+        - currency
+        - sentAt
+      description: A reminder sent to one member about the balance they owe.
+      properties:
+        participantToken:
+          $ref: '#/components/schemas/Token'
+        channel:
+          type: string
+          enum:
+            - email
+            - push
+        amountCents:
+          type: integer
+          description: What the member owed when reminded, in minor units of `currency`.
+        currency:
+          $ref: '#/components/schemas/Currency'
+        sentAt:
+          type: string
+          format: date-time
+    RecurringExpense:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - description
+        - amountCents
+        - currency
+        - category
+        - groupCategoryToken
+        - paidByToken
+        - splitType
+        - splits
+        - cadence
+        - interval
+        - startsOn
+        - nextOccursOn
+        - paused
+        - createdAt
+        - updatedAt
+      description: |
+        An expense wariwari posts on a schedule. While the group isn't Pro the
+        schedule is `paused`: occurrences are skipped, not queued, and it keeps
+        moving so nothing piles up for later.
+      properties:
+        token:
+          $ref: '#/components/schemas/Token'
+        description:
+          type: string
+          minLength: 1
+          maxLength: 120
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          $ref: '#/components/schemas/Currency'
+        category:
+          type: string
+          minLength: 1
+          maxLength: 40
+        groupCategoryToken:
+          oneOf:
+            - $ref: '#/components/schemas/Token'
+            - type: 'null'
+        paidByToken:
+          $ref: '#/components/schemas/Token'
+        splitType:
+          $ref: '#/components/schemas/SplitType'
+        splits:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - participantToken
+            description: |
+              Who shares each occurrence. `amountCents` is the share for `amount`
+              splits, `percentage` for `percentage`, `shares` for `shares`; an
+              `equal` split takes only the tokens.
+            properties:
+              participantToken:
+                $ref: '#/components/schemas/Token'
+              amountCents:
+                type: integer
+                minimum: 0
+              percentage:
+                type: number
+                minimum: 0
+                maximum: 100
+              shares:
+                type: integer
+                minimum: 0
+        cadence:
+          type: string
+          enum:
+            - weekly
+            - monthly
+            - yearly
+        interval:
+          type: integer
+          minimum: 1
+          description: Every `interval` weeks, months or years.
+        startsOn:
+          type: string
+          format: date
+        nextOccursOn:
+          type: string
+          format: date
+        paused:
+          type: boolean
+          description: True while the group isn't Pro.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    RecurringExpenseList:
+      type: object
+      additionalProperties: false
+      required:
+        - recurringExpenses
+      properties:
+        recurringExpenses:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecurringExpense'
+    RecurringExpenseCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - description
+        - amountCents
+        - currency
+        - paidByToken
+        - splitType
+        - splits
+        - cadence
+        - startsOn
+      properties:
+        token:
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: Optional client-generated token. When absent the server generates one.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 120
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          $ref: '#/components/schemas/Currency'
+        category:
+          type: string
+          minLength: 1
+          maxLength: 40
+        groupCategoryToken:
+          $ref: '#/components/schemas/Token'
+        paidByToken:
+          $ref: '#/components/schemas/Token'
+        splitType:
+          $ref: '#/components/schemas/SplitType'
+        splits:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - participantToken
+            description: |
+              Who shares each occurrence. `amountCents` is the share for `amount`
+              splits, `percentage` for `percentage`, `shares` for `shares`; an
+              `equal` split takes only the tokens.
+            properties:
+              participantToken:
+                $ref: '#/components/schemas/Token'
+              amountCents:
+                type: integer
+                minimum: 0
+              percentage:
+                type: number
+                minimum: 0
+                maximum: 100
+              shares:
+                type: integer
+                minimum: 0
+        cadence:
+          type: string
+          enum:
+            - weekly
+            - monthly
+            - yearly
+        interval:
+          type: integer
+          minimum: 1
+          default: 1
+        startsOn:
+          type: string
+          format: date
+    RecurringExpenseUpdate:
+      type: object
+      additionalProperties: false
+      description: Send only the fields that change.
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 120
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          $ref: '#/components/schemas/Currency'
+        category:
+          type: string
+          minLength: 1
+          maxLength: 40
+        groupCategoryToken:
+          $ref: '#/components/schemas/Token'
+        paidByToken:
+          $ref: '#/components/schemas/Token'
+        splitType:
+          $ref: '#/components/schemas/SplitType'
+        splits:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - participantToken
+            description: |
+              Who shares each occurrence. `amountCents` is the share for `amount`
+              splits, `percentage` for `percentage`, `shares` for `shares`; an
+              `equal` split takes only the tokens.
+            properties:
+              participantToken:
+                $ref: '#/components/schemas/Token'
+              amountCents:
+                type: integer
+                minimum: 0
+              percentage:
+                type: number
+                minimum: 0
+                maximum: 100
+              shares:
+                type: integer
+                minimum: 0
+        cadence:
+          type: string
+          enum:
+            - weekly
+            - monthly
+            - yearly
+        interval:
+          type: integer
+          minimum: 1
+          default: 1
+        startsOn:
+          type: string
+          format: date
     PaymentBase:
       type: object
       description: Fields shared by `PaymentCreate` and `PaymentUpdate`.
@@ -4796,6 +5526,7 @@ components:
         - onboarded
         - createdAt
         - notificationPreferences
+        - pro
       additionalProperties: false
       properties:
         id:
@@ -4831,35 +5562,12 @@ components:
           type: boolean
         notificationPreferences:
           $ref: '#/components/schemas/NotificationPreferences'
-        billingState:
-          type: object
-          description: Current subscription/billing snapshot for the user.
-          additionalProperties: false
-          properties:
-            planKey:
-              type:
-                - string
-                - 'null'
-            subscribed:
-              type: boolean
-            provider:
-              type:
-                - string
-                - 'null'
-            status:
-              type:
-                - string
-                - 'null'
-            currentPeriodEndsAt:
-              type:
-                - string
-                - 'null'
-              format: date-time
-            endsAt:
-              type:
-                - string
-                - 'null'
-              format: date-time
+        pro:
+          type: boolean
+          description: |
+            True while the account holds Pro: a purchase that is not refunded and
+            not expired. Pro unlocks API writes and AI integrations for this
+            account, and the Pro group features in every group it belongs to.
         onboarded:
           type: boolean
         createdAt:
@@ -5019,6 +5727,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error401'
+    Forbidden:
+      description: Authenticated, but not allowed to access this resource or action.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error403'
     NotFound:
       description: Resource not found
       content:
@@ -5034,12 +5748,6 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error409'
-    Forbidden:
-      description: Authenticated, but not allowed to access this resource or action.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error403'
   parameters:
     MutationOperationId:
       name: Idempotency-Key
@@ -5105,6 +5813,13 @@ components:
       description: Transaction token.
       schema:
         $ref: '#/components/schemas/Token'
+    RecurringExpenseToken:
+      name: recurring_expense_token
+      in: path
+      required: true
+      description: Recurring expense token.
+      schema:
+        $ref: '#/components/schemas/Token'
     PaymentToken:
       name: payment_token
       in: path
@@ -5141,6 +5856,8 @@ x-tagGroups:
       - categories
       - transactions
       - payments
+      - reminders
+      - recurring_expenses
       - invitations
       - access_requests
       - import

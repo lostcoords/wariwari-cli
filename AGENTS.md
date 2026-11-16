@@ -95,6 +95,12 @@ Two carve-outs:
 | `access-request list`        | `GET /v1/groups/:g/access_requests`                           |
 | `access-request approve`     | `POST /v1/groups/:g/access_requests/:id/approval`             |
 | `access-request decline`     | `POST /v1/groups/:g/access_requests/:id/decline`              |
+| `transaction receipt upload` | `PUT /v1/groups/:g/transactions/:t/receipt_photo` (multipart) |
+| `transaction receipt delete` | `DELETE /v1/groups/:g/transactions/:t/receipt_photo`          |
+| `reminder send` / `remind`   | `POST /v1/groups/:g/reminders` (one per owing member)         |
+| `reminder schedule`          | `PATCH` / `DELETE` (`off`) `/v1/groups/:g/reminder_schedule`  |
+| `recurring list` / `create`  | `GET` / `POST /v1/groups/:g/recurring_expenses`               |
+| `recurring show` / `update` / `delete` | `GET` / `PATCH` / `DELETE /v1/groups/:g/recurring_expenses/:token` |
 
 `transaction list` filters: `from`, `to` (inclusive ISO dates), `category`
 (group category token), `participant` (paid-for **or** owes-a-share), plus
@@ -137,8 +143,8 @@ answer it with `403 ACCESS_DENIED`, so the CLI does not wrap them:
 `/v1/account/payment_methods*`, `/v1/account/device_tokens*`,
 `/v1/account/email_change`, `DELETE /v1/account`, and the imports.
 
-Updates are **PATCH**, never PUT. There is no PUT anywhere in the API, and
-`client.Client` has no `Put` method.
+Updates are **PATCH**. The one PUT is the multipart receipt photo upload,
+`client.Client.PutFile`; JSON bodies never go by PUT.
 
 ### Semantics worth remembering
 
@@ -165,6 +171,8 @@ Updates are **PATCH**, never PUT. There is no PUT anywhere in the API, and
   `code`, `instance`, plus `errors` (validation) and `current` (409). Switch on
   `code`; `VALIDATION_FAILED` is a `400`, not a `422`. A `429` is
   `RATE_LIMIT_EXCEEDED` or `QUOTA_EXCEEDED`, with `Retry-After`.
+  `403 PRO_REQUIRED` carries `upgradeUrl`; `printErr` turns it and
+  `QUOTA_EXCEEDED` into a plain-language hint.
 - **Pagination is keyset**: `take` defaults to 50 and caps at 100; read
   `pagination.hasMore` / `pagination.cursor`.
 

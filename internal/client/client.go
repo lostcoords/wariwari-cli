@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -123,6 +125,35 @@ func (c *Client) Delete(ctx context.Context, path string, w Write) (any, error) 
 	return c.Do(ctx, http.MethodDelete, path, nil, w.Body, w.header())
 }
 
+// File is one file part of a multipart upload.
+type File struct {
+	Field       string
+	Name        string
+	ContentType string
+	Content     []byte
+}
+
+// PutFile replaces a resource with an uploaded file, sent as
+// multipart/form-data. It is the API's only PUT.
+func (c *Client) PutFile(ctx context.Context, path string, file File) (any, error) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	part := textproto.MIMEHeader{}
+	part.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, file.Field, file.Name))
+	part.Set("Content-Type", file.ContentType)
+	w, err := form.CreatePart(part)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Write(file.Content); err != nil {
+		return nil, err
+	}
+	if err := form.Close(); err != nil {
+		return nil, err
+	}
+	return c.decode(c.send(ctx, http.MethodPut, path, nil, &body, http.Header{"Content-Type": {form.FormDataContentType()}}))
+}
+
 // GetRaw fetches a non-JSON body, such as the CSV export.
 func (c *Client) GetRaw(ctx context.Context, path, accept string) ([]byte, error) {
 	resp, data, err := c.send(ctx, http.MethodGet, path, nil, nil, http.Header{"Accept": {accept}})
@@ -137,7 +168,23 @@ func (c *Client) GetRaw(ctx context.Context, path, accept string) ([]byte, error
 
 // Do sends a JSON request. A 204 No Content returns nil data.
 func (c *Client) Do(ctx context.Context, method, path string, query map[string]string, body any, header http.Header) (any, error) {
-	resp, data, err := c.send(ctx, method, path, query, body, header)
+	var r io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		r = bytes.NewReader(data)
+		header = header.Clone()
+		if header == nil {
+			header = http.Header{}
+		}
+		header.Set("Content-Type", "application/json")
+	}
+	return c.decode(c.send(ctx, method, path, query, r, header))
+}
+
+func (c *Client) decode(resp *http.Response, data []byte, err error) (any, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +204,7 @@ func (c *Client) Do(ctx context.Context, method, path string, query map[string]s
 	return decoded, nil
 }
 
-func (c *Client) send(ctx context.Context, method, path string, query map[string]string, body any, header http.Header) (*http.Response, []byte, error) {
+func (c *Client) send(ctx context.Context, method, path string, query map[string]string, body io.Reader, header http.Header) (*http.Response, []byte, error) {
 	u, err := url.Parse(c.BaseURL + "/v1" + path)
 	if err != nil {
 		return nil, nil, err
@@ -172,24 +219,12 @@ func (c *Client) send(ctx context.Context, method, path string, query map[string
 		u.RawQuery = q.Encode()
 	}
 
-	var r io.Reader
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return nil, nil, err
-		}
-		r = bytes.NewReader(data)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), r)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return nil, nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.UserAgent)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}

@@ -3,8 +3,9 @@ package commands
 import "github.com/spf13/cobra"
 
 var transactionCmd = &cobra.Command{
-	Use:   "transaction",
-	Short: "Manage transactions",
+	Use:     "transaction",
+	Aliases: []string{"expense"},
+	Short:   "Manage transactions",
 }
 
 var transactionCursor string
