@@ -55,7 +55,7 @@ accessRequested, accessApproved). Returns the updated account.`,
 	},
 }
 
-// proSummary marks a record whose `pro` field is set, so a human reading the
+// proSummary marks an account whose `pro` field is set, so a human reading the
 // envelope sees the plan without scanning the payload.
 func proSummary(summary string, data any) string {
 	record, _ := data.(map[string]any)

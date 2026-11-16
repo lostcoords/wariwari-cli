@@ -12,7 +12,7 @@ import (
 var reminderCmd = &cobra.Command{
 	Use:     "reminder",
 	Aliases: []string{"reminders"},
-	Short:   "Remind members who owe money (Pro groups)",
+	Short:   "Remind members who owe money (Pro)",
 }
 
 var reminderParticipant string
@@ -22,7 +22,7 @@ remind that member; without it, remind everyone who owes and whom you may
 remind (an admin, anyone; other members, the people who owe them). Members who
 are not reminded are listed under "skipped" with the reason: unlinked,
 opted_out or recently_reminded. Each member is reminded at most once a day.
-Needs a Pro group; otherwise 403 PRO_REQUIRED.`
+Needs Pro on your account; otherwise 403 PRO_REQUIRED.`
 
 var reminderSendCmd = &cobra.Command{
 	Use:   "send [GROUP_TOKEN]",
@@ -97,7 +97,7 @@ has one.
 
 "reminder schedule show" prints the current schedule.
 
-Turning them on needs a Pro group; otherwise 403 PRO_REQUIRED. Turning them off
+Turning them on needs Pro on your account; otherwise 403 PRO_REQUIRED. Turning them off
 always works, and succeeds when they are already off.`,
 	Args:      cobra.RangeArgs(1, 2),
 	ValidArgs: []string{"weekly", "monthly", "off"},

@@ -8,7 +8,7 @@ import (
 
 var recurringCmd = &cobra.Command{
 	Use:   "recurring",
-	Short: "Manage expenses posted on a schedule (Pro groups)",
+	Short: "Manage expenses posted on a schedule (Pro)",
 }
 
 var (
@@ -22,7 +22,8 @@ var recurringListCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List a group's recurring expenses",
 	Long: `List a group's recurring expenses, paused ones included. A schedule is
-paused while the group isn't Pro: occurrences are skipped, not saved for later.`,
+paused while the member who set it up has no Pro or has left the group:
+occurrences are skipped, not saved for later.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 0)
@@ -70,7 +71,7 @@ flags, which override the same fields in the body:
   --interval N                    every N weeks, months or years (default 1)
   --starts YYYY-MM-DD             first occurrence (required unless the body has it)
 
-Needs a Pro group; otherwise 403 PRO_REQUIRED. Retry safely with
+Needs Pro on your account; otherwise 403 PRO_REQUIRED. Retry safely with
 --idempotency-key and the same body.`,
 	Example: `  wariwari recurring create GROUP_TOKEN --data-file rent.json --every monthly --starts 2026-12-01
   wariwari recurring example create --json`,
@@ -97,7 +98,7 @@ var recurringUpdateCmd = &cobra.Command{
 	Short: "Change a recurring expense",
 	Long: `Change a schedule: send only the fields that change, as JSON, flags, or both.
 Sending splits replaces them all. Expenses it already posted stay as they are.
-Needs a Pro group; otherwise 403 PRO_REQUIRED.`,
+Needs Pro on your account; otherwise 403 PRO_REQUIRED.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 1)

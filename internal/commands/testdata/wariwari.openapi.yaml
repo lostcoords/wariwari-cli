@@ -825,9 +825,8 @@ paths:
       operationId: createGroupAttachment
       summary: Share a photo or file in a group
       description: |
-        Needs a Pro group; otherwise 403 `PRO_REQUIRED`. A file that would take the
-        group past 500 MB, or its sponsor past 2 GB across the groups they cover, is
-        refused with 413 `STORAGE_LIMIT`. A group holds at most 50 files.
+        Needs Pro on the signed-in account; otherwise 403 `PRO_REQUIRED`. A file that would take
+        your storage past 5 GB, counted across every group, is refused with 413 `STORAGE_LIMIT`.
       requestBody:
         required: true
         content:
@@ -888,7 +887,7 @@ paths:
         - attachments
       operationId: deleteGroupAttachment
       summary: Delete a photo or file
-      description: Works without Pro, so a group that lost Pro can still clean up.
+      description: Works without Pro, so anyone can clean up without Pro.
       responses:
         '204':
           description: Deleted
@@ -1249,9 +1248,8 @@ paths:
       summary: Attach or replace an expense's receipt photo
       description: |
         Stores one photo of the receipt for an expense, replacing any earlier one.
-        Photos are re-encoded to WebP on upload. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
-        A photo that would take the group past 500 MB, or its sponsor past 2 GB across the groups
-        they cover, is refused with 413 `STORAGE_LIMIT`.
+        Photos are re-encoded to WebP on upload. Needs Pro on the signed-in account; otherwise 403 `PRO_REQUIRED`.
+        A photo that would take your storage past 5 GB, counted across every group, is refused with 413 `STORAGE_LIMIT`.
       requestBody:
         required: true
         content:
@@ -1286,7 +1284,7 @@ paths:
         - transactions
       operationId: deleteReceiptPhoto
       summary: Remove an expense's receipt photo
-      description: Deletes the photo. Works without Pro, so a group that lost Pro can still clean up.
+      description: Deletes the photo. Works without Pro, so anyone can clean up without Pro.
       responses:
         '204':
           description: Deleted
@@ -1877,7 +1875,7 @@ paths:
       summary: Turn on or change a group's balance reminders
       description: |
         Sets when wariwari reminds members who owe money. Reminders are off
-        until a group has a schedule. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+        until a group has a schedule. Needs Pro on the signed-in account; otherwise 403 `PRO_REQUIRED`.
       requestBody:
         required: true
         content:
@@ -1949,7 +1947,7 @@ paths:
         `VALIDATION_FAILED` when they owe nothing, have no account or turned
         reminders off, and 429 `RATE_LIMIT_EXCEEDED` with `Retry-After` when
         already reminded today. Without it, reminds everyone the caller may remind
-        and lists the rest under `skipped`. Needs a Pro group; otherwise 403
+        and lists the rest under `skipped`. Needs Pro on the signed-in account; otherwise 403
         `PRO_REQUIRED`.
       parameters:
         - $ref: '#/components/parameters/MutationOperationId'
@@ -2019,7 +2017,7 @@ paths:
       operationId: createRecurringExpense
       summary: Create a recurring expense
       description: |
-        Schedules an expense that wariwari posts on every occurrence. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+        Schedules an expense that wariwari posts on every occurrence. Needs Pro on the signed-in account; otherwise 403 `PRO_REQUIRED`.
       parameters:
         - $ref: '#/components/parameters/MutationOperationId'
       requestBody:
@@ -2088,7 +2086,7 @@ paths:
       summary: Update a recurring expense
       description: |
         Changes a schedule. Expenses it already posted stay as they are. The last write wins: a schedule
-        has no lockVersion. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+        has no lockVersion. Needs Pro on the signed-in account; otherwise 403 `PRO_REQUIRED`.
       parameters:
         - $ref: '#/components/parameters/MutationOperationId'
       requestBody:
@@ -3663,7 +3661,6 @@ components:
         - name
         - icon
         - currency
-        - pro
         - fxRates
         - lockVersion
         - createdAt
@@ -3685,11 +3682,6 @@ components:
           allOf:
             - $ref: '#/components/schemas/Currency'
           description: Base currency for totals and balances (ISO-4217).
-        pro:
-          type: boolean
-          description: |
-            True while at least one linked member holds Pro. Attachments, receipt
-            photos, reminders and recurring expenses need a Pro group.
         fxRates:
           type: object
           description: |
@@ -4460,7 +4452,7 @@ components:
       required:
         - usedBytes
         - limitBytes
-      description: Storage the group's photos, files and receipt photos take, against the group's limit.
+      description: Storage the photos, files and receipt photos a person uploaded take, across every group, against their limit.
       properties:
         usedBytes:
           type: integer
@@ -4480,7 +4472,10 @@ components:
           items:
             $ref: '#/components/schemas/GroupAttachment'
         storage:
-          $ref: '#/components/schemas/StorageUsage'
+          description: The signed-in person's storage across every group, or `null` for a reader without an account.
+          oneOf:
+            - $ref: '#/components/schemas/StorageUsage'
+            - type: 'null'
         pagination:
           $ref: '#/components/schemas/Pagination'
       additionalProperties: false
@@ -5163,8 +5158,13 @@ components:
         - weekday
         - day
         - nextRunOn
+        - paused
+        - ownerName
         - updatedAt
-      description: When a group's members who owe money get reminded.
+      description: |
+        When a group's members who owe money get reminded. Reminders run on the Pro
+        of the member who last set them: while that member doesn't have Pro or has
+        left the group they are `paused`.
       properties:
         cadence:
           type: string
@@ -5189,6 +5189,14 @@ components:
           type: string
           format: date
           description: The Tokyo date of the next reminder run, which goes out at 9:00 Tokyo time.
+        paused:
+          type: boolean
+          description: True while the member who set the reminders doesn't have Pro or has left the group.
+        ownerName:
+          type:
+            - string
+            - 'null'
+          description: The name of the member who set the reminders, or `null` when they have left the group.
         updatedAt:
           type: string
           format: date-time
@@ -5298,12 +5306,14 @@ components:
         - startsOn
         - nextOccursOn
         - paused
+        - ownerName
         - createdAt
         - updatedAt
       description: |
-        An expense wariwari posts on a schedule. While the group isn't Pro the
-        schedule is `paused`: occurrences are skipped, not queued, and it keeps
-        moving so nothing piles up for later.
+        An expense wariwari posts on a schedule. It runs on the Pro of the member
+        who set it up: while they don't have Pro or have left the group it is
+        `paused`, occurrences are skipped, not queued, and it keeps moving so
+        nothing piles up for later.
       properties:
         token:
           $ref: '#/components/schemas/Token'
@@ -5371,7 +5381,12 @@ components:
           format: date
         paused:
           type: boolean
-          description: True while the group isn't Pro.
+          description: True while the member who set it up doesn't have Pro or has left the group.
+        ownerName:
+          type:
+            - string
+            - 'null'
+          description: The name of the member who set it up, or `null` when they have left the group.
         createdAt:
           type: string
           format: date-time
@@ -5920,8 +5935,10 @@ components:
           type: boolean
           description: |
             True while the account holds Pro: a purchase that is not refunded and
-            not expired. Pro unlocks API writes and AI integrations for this
-            account, and the Pro group features in every group it belongs to.
+            not expired. Pro is personal: it lets this account upload photos and
+            files, scan receipts, set reminders and recurring expenses in any group,
+            and write through the API and AI integrations. Everyone in a group sees
+            what a Pro member adds.
         onboarded:
           type: boolean
         createdAt:
@@ -6105,7 +6122,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error409'
     StorageLimit:
-      description: The upload would take the group or its Pro sponsor past their storage limit (`STORAGE_LIMIT`).
+      description: The upload would take the uploader past their storage limit (`STORAGE_LIMIT`).
       content:
         application/json:
           schema:

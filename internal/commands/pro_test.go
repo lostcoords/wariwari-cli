@@ -159,7 +159,7 @@ func TestUploadsSendTheFileAsMultipart(t *testing.T) {
 	}
 }
 
-func TestAccountAndGroupSummariesShowPro(t *testing.T) {
+func TestAccountSummaryShowsPro(t *testing.T) {
 	tests := []struct {
 		body string
 		args []string
@@ -167,7 +167,6 @@ func TestAccountAndGroupSummariesShowPro(t *testing.T) {
 	}{
 		{`{"token":"usr_1","pro":true}`, []string{"account", "show"}, `"summary": "Account (Pro)"`},
 		{`{"token":"usr_1","pro":false}`, []string{"me"}, `"summary": "Account (free)"`},
-		{`{"token":"grp_1","pro":true}`, []string{"group", "show", "grp_1"}, `"summary": "Group snapshot (Pro)"`},
 	}
 	for _, tt := range tests {
 		handler := func(w http.ResponseWriter, _ *http.Request) {

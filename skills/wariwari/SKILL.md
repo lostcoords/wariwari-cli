@@ -268,9 +268,10 @@ the first outcome for 90 days. Reusing the key with a different body returns
 
 ## Pro workflows
 
-Reminders, recurring expenses, receipt photo uploads and shared files need a Pro group: one where a
-linked member holds Pro. The group snapshot's `pro` and the account's `pro`
-say which. Without it these answer `403 PRO_REQUIRED` with an `upgradeUrl`;
+Reminders, recurring expenses, receipt photo uploads and shared files need Pro
+on the signed-in account (the account's `pro`). Everyone in the group sees what
+a Pro member adds; reminders and recurring expenses pause (`paused`,
+`ownerName`) while the member who set them up has no Pro or has left. Without it these answer `403 PRO_REQUIRED` with an `upgradeUrl`;
 pass that URL to the user rather than retrying.
 
 ```bash

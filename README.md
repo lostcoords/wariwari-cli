@@ -268,10 +268,11 @@ same key and body: the server replays the first outcome for 90 days. A client
 `409 DUPLICATE_TOKEN`. Never invent tokens for existing participants or
 categories.
 
-## Pro group features
+## Pro features
 
-Reminders, recurring expenses, receipt photo uploads and shared files need a Pro group, one where a
-linked member holds Pro (`pro` on the group snapshot).
+Reminders, recurring expenses, receipt photo uploads and shared files need Pro on your own account
+(`pro` in `wariwari account show`). Everyone in the group sees what you add. Your reminders and
+recurring expenses pause while you have no Pro or have left the group.
 
 ```bash
 wariwari remind GROUP_TOKEN                                   # everyone who owes money

@@ -76,7 +76,7 @@ payload. For one member's balance worked out transaction by transaction, see
 		if err != nil {
 			return err
 		}
-		return printOK(data, proSummary("Group snapshot", data),
+		return printOK(data, "Group snapshot",
 			crumb("balance", "wariwari balance "+group, "Show balances and suggested payments"),
 			crumb("transactions", "wariwari transaction list "+group, "Page through transactions"))
 	},

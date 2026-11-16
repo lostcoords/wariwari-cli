@@ -21,8 +21,8 @@ var transactionReceiptUploadCmd = &cobra.Command{
 	Short: "Attach a receipt photo, replacing any earlier one",
 	Long: `Store one photo of the receipt for an expense, replacing any earlier one.
 FILE is a JPEG, PNG, WebP or HEIC image; the server re-encodes it. Returns the
-stored photo with a short-lived url. Needs a Pro group; otherwise 403
-PRO_REQUIRED.`,
+stored photo with a short-lived url. Needs Pro on your account; otherwise
+403 PRO_REQUIRED.`,
 	Args: cobra.RangeArgs(2, 3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 2)
@@ -67,7 +67,7 @@ var transactionReceiptDeleteCmd = &cobra.Command{
 	Use:     "delete TRANSACTION_TOKEN [GROUP_TOKEN]",
 	Aliases: []string{"rm"},
 	Short:   "Remove an expense's receipt photo",
-	Long:    `Delete the receipt photo. Works without Pro, so a group that lost Pro can still clean up.`,
+	Long:    `Delete the receipt photo. Works without Pro.`,
 	Args:    cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 1)
