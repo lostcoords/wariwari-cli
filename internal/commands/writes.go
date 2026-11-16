@@ -132,6 +132,22 @@ func transactionRecord(group, token string) func(context.Context) (map[string]an
 	}
 }
 
+// absentOn404 tells "this group or record has none" from "no such group or
+// record": both are 404, so a 404 is only absence when the parent still reads.
+func absentOn404(ctx context.Context, err error, parent func(context.Context) (map[string]any, error)) (bool, error) {
+	var apiErr *client.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		return false, err
+	}
+	if _, parentErr := parent(ctx); parentErr != nil {
+		if errors.Is(parentErr, errRecordMissing) {
+			return false, err
+		}
+		return false, parentErr
+	}
+	return true, nil
+}
+
 func missingOn404(err error) error {
 	var apiErr *client.Error
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {

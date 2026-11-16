@@ -56,10 +56,10 @@ there is no API route to list or mint one. `wariwari auth login` with no
 argument runs a browser login instead: it prints a one-time code and waits for
 a person to approve it in their browser. Use it only when the user is at the
 terminal and asks for it; otherwise ask them for a key.
-A developer API key on a Pro account (lifetime, ¥980) can do everything below,
-including creating groups (20 an hour), with no monthly quota. On a free
-account the key only reads: 50 calls a month, and any write answers
-`403 PRO_REQUIRED`. Short-term per-IP and per-credential rate limits apply
+Free API keys can read with a monthly limit; writes need wariwari Pro and
+answer `403 PRO_REQUIRED` without it. The server's error says the current price
+and limit; show its `detail` and `upgradeUrl` as sent. On a Pro account a key
+can do everything below, including creating groups (20 an hour). Short-term per-IP and per-credential rate limits apply
 either way.
 
 Developer keys cannot reach session-only routes (sessions, sign-in identities,
@@ -268,7 +268,7 @@ the first outcome for 90 days. Reusing the key with a different body returns
 
 ## Pro workflows
 
-Reminders, recurring expenses and receipt photos need a Pro group: one where a
+Reminders, recurring expenses, receipt photo uploads and shared files need a Pro group: one where a
 linked member holds Pro. The group snapshot's `pro` and the account's `pro`
 say which. Without it these answer `403 PRO_REQUIRED` with an `upgradeUrl`;
 pass that URL to the user rather than retrying.
@@ -276,6 +276,7 @@ pass that URL to the user rather than retrying.
 ```bash
 wariwari remind GROUP_TOKEN --json                                # everyone who owes money
 wariwari remind GROUP_TOKEN --participant PARTICIPANT_TOKEN --json
+wariwari reminder schedule show GROUP_TOKEN --json
 wariwari reminder schedule weekly GROUP_TOKEN --weekday mon --json
 wariwari reminder schedule monthly GROUP_TOKEN --day 25 --json
 wariwari reminder schedule off GROUP_TOKEN --json
@@ -283,19 +284,24 @@ wariwari recurring list GROUP_TOKEN --json
 wariwari recurring create GROUP_TOKEN --data-file rent.json --every monthly --starts 2026-12-01 --json
 wariwari recurring update RECURRING_TOKEN GROUP_TOKEN --interval 2 --json
 wariwari recurring delete RECURRING_TOKEN GROUP_TOKEN --json
+wariwari transaction receipt show TRANSACTION_TOKEN GROUP_TOKEN --json
 wariwari transaction receipt upload TRANSACTION_TOKEN receipt.jpg GROUP_TOKEN --json
 wariwari transaction receipt delete TRANSACTION_TOKEN GROUP_TOKEN --json
+wariwari file list GROUP_TOKEN --json
+wariwari file upload photo.jpg GROUP_TOKEN --json
+wariwari file delete FILE_ID GROUP_TOKEN --json
 ```
 
-`remind` without `--participant` reminds every member with a negative balance
-in any currency; a member reminded recently comes back under `skipped`. A
+`remind` without `--participant` reminds everyone who owes and whom you may
+remind; the rest come back under `skipped` with a `reason` (`unlinked`,
+`opted_out`, `recently_reminded`). Each member is reminded at most once a day. A
 recurring expense's body is the expense fields of `transaction create`
 (`description`, `amountCents`, `currency`, `paidByToken`, `splitType`,
 `splits`, optional `category` or `groupCategoryToken`) without `date`;
 `--every weekly|monthly|yearly`, `--interval N` and `--starts YYYY-MM-DD` set
 `cadence`, `interval` and `startsOn`. While the group isn't Pro a schedule is
 `paused`: occurrences are skipped, not saved for later. Deleting a receipt
-photo works without Pro.
+photo or a file works without Pro, and so does reading them.
 
 ## Settle-up workflow
 
@@ -388,7 +394,7 @@ Failures are RFC 9457 Problem Details. Switch on `code`, show `detail`:
 | `AUTH_CREDENTIALS_REQUIRED` / `AUTH_CREDENTIALS_INVALID` / `AUTH_CREDENTIALS_EXPIRED` | 401 | Ask for a key and run `wariwari auth login wari_...`. |
 | `ACCESS_DENIED`                                   | 403    | Session-only action the key cannot do.              |
 | `INSUFFICIENT_PERMISSIONS`                        | 403    | No edit access, or an admin-only action.            |
-| `PRO_REQUIRED`                                    | 403    | Needs Pro. Give the user `upgradeUrl`; don't retry. |
+| `PRO_REQUIRED`                                    | 403    | Needs Pro. Show `detail` and `upgradeUrl`.          |
 | `NOT_FOUND`                                       | 404    | Wrong token, or the record was deleted.             |
 | `INVALID_REQUEST`                                 | 400    | Malformed date, cursor, or body.                    |
 | `VALIDATION_FAILED`                               | 400    | Read the `errors` map (camelCase field names).      |
@@ -396,7 +402,7 @@ Failures are RFC 9457 Problem Details. Switch on `code`, show `detail`:
 | `IDEMPOTENCY_KEY_IN_USE`                          | 409    | Same key, different body. Use a fresh key.          |
 | `DUPLICATE_TOKEN`                                 | 409    | Client token already used. Read the snapshot.       |
 | `RATE_LIMIT_EXCEEDED`                             | 429    | Back off for `retryAfter` seconds.                  |
-| `QUOTA_EXCEEDED`                                  | 429    | Free key's 50 monthly calls used. Tell the user.    |
+| `QUOTA_EXCEEDED`                                  | 429    | Free key quota used. Show `detail` and `upgradeUrl`.|
 | `IDEMPOTENCY_IN_PROGRESS`                         | 503    | A concurrent retry is running. Wait and retry.      |
 | `INTERNAL_SERVER_EXCEPTION`                       | 500    | Retry later; report `instance` if it persists.      |
 

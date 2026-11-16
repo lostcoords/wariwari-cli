@@ -95,10 +95,14 @@ Two carve-outs:
 | `access-request list`        | `GET /v1/groups/:g/access_requests`                           |
 | `access-request approve`     | `POST /v1/groups/:g/access_requests/:id/approval`             |
 | `access-request decline`     | `POST /v1/groups/:g/access_requests/:id/decline`              |
+| `transaction receipt show`   | `GET /v1/groups/:g/transactions/:t/receipt_photo`             |
 | `transaction receipt upload` | `PUT /v1/groups/:g/transactions/:t/receipt_photo` (multipart) |
 | `transaction receipt delete` | `DELETE /v1/groups/:g/transactions/:t/receipt_photo`          |
-| `reminder send` / `remind`   | `POST /v1/groups/:g/reminders` (one per owing member)         |
+| `reminder send` / `remind`   | `POST /v1/groups/:g/reminders` (no body: everyone who owes)   |
+| `reminder schedule show`     | `GET /v1/groups/:g/reminder_schedule` (404 = off)             |
 | `reminder schedule`          | `PATCH` / `DELETE` (`off`) `/v1/groups/:g/reminder_schedule`  |
+| `file list` / `upload`       | `GET` / `POST /v1/groups/:g/attachments` (upload multipart)   |
+| `file show` / `delete`       | `GET` / `DELETE /v1/groups/:g/attachments/:id`                |
 | `recurring list` / `create`  | `GET` / `POST /v1/groups/:g/recurring_expenses`               |
 | `recurring show` / `update` / `delete` | `GET` / `PATCH` / `DELETE /v1/groups/:g/recurring_expenses/:token` |
 
@@ -143,8 +147,10 @@ answer it with `403 ACCESS_DENIED`, so the CLI does not wrap them:
 `/v1/account/payment_methods*`, `/v1/account/device_tokens*`,
 `/v1/account/email_change`, `DELETE /v1/account`, and the imports.
 
-Updates are **PATCH**. The one PUT is the multipart receipt photo upload,
-`client.Client.PutFile`; JSON bodies never go by PUT.
+Updates are **PATCH**. The one PUT is the multipart receipt photo upload;
+uploads go through `client.Client.Upload`, and JSON bodies never go by PUT.
+`receipt show` and `schedule show` read a 404 as "none" only after the parent
+expense or group reads (`absentOn404`).
 
 ### Semantics worth remembering
 
@@ -171,8 +177,9 @@ Updates are **PATCH**. The one PUT is the multipart receipt photo upload,
   `code`, `instance`, plus `errors` (validation) and `current` (409). Switch on
   `code`; `VALIDATION_FAILED` is a `400`, not a `422`. A `429` is
   `RATE_LIMIT_EXCEEDED` or `QUOTA_EXCEEDED`, with `Retry-After`.
-  `403 PRO_REQUIRED` carries `upgradeUrl`; `printErr` turns it and
-  `QUOTA_EXCEEDED` into a plain-language hint.
+  `403 PRO_REQUIRED` and `429 QUOTA_EXCEEDED` carry `upgradeUrl`, and their
+  `detail` states the price and limit: print it as sent, never a copy.
+  `/v1/account/purchase_sync` is session-only and absent from the public spec.
 - **Pagination is keyset**: `take` defaults to 50 and caps at 100; read
   `pagination.hasMore` / `pagination.cursor`.
 
@@ -215,7 +222,7 @@ stay `wariwari_<version>_<os>_<arch>.tar.gz`. Both honour
 ```bash
 make build       # go build -o bin/wariwari ./cmd/wariwari
 make check       # gofmt -l, go vet, go test ./internal/...
-make sync-spec   # copy ../wariwari/openapi/dist/wariwari.bundled.yaml into testdata
+make sync-spec   # copy $WARIWARI_SERVER/openapi/dist/wariwari.bundled.yaml into testdata (default ../wariwari)
 ```
 
 `contract_test.go` lists every command with the request it ends with and the

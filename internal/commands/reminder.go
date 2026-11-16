@@ -1,9 +1,7 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -19,10 +17,12 @@ var reminderCmd = &cobra.Command{
 
 var reminderParticipant string
 
-const reminderSendHelp = `Send a reminder of what they owe. With --participant, remind that member;
-without it, remind every member the snapshot shows owing money in any
-currency. A member reminded recently is skipped (RATE_LIMIT_EXCEEDED) and
-listed under "skipped". Needs a Pro group; otherwise 403 PRO_REQUIRED.`
+const reminderSendHelp = `Remind members of what they owe, by push or email. With --participant,
+remind that member; without it, remind everyone who owes and whom you may
+remind (an admin, anyone; other members, the people who owe them). Members who
+are not reminded are listed under "skipped" with the reason: unlinked,
+opted_out or recently_reminded. Each member is reminded at most once a day.
+Needs a Pro group; otherwise 403 PRO_REQUIRED.`
 
 var reminderSendCmd = &cobra.Command{
 	Use:   "send [GROUP_TOKEN]",
@@ -46,59 +46,40 @@ func runReminderSend(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	path := "/groups/" + group + "/reminders"
+	w := write(nil)
 	if reminderParticipant != "" {
-		data, err := api.Post(cmd.Context(), path, write(map[string]any{"participantToken": reminderParticipant}))
-		if err != nil {
-			return err
-		}
-		return printOK(data, "Reminder sent")
+		w.Body = map[string]any{"participantToken": reminderParticipant}
 	}
-	if idempotencyKeyFlag != "" {
-		return fmt.Errorf("--idempotency-key needs --participant: one key covers one reminder")
-	}
-
-	snapshot, err := groupSnapshot(cmd.Context(), group)
+	data, err := api.Post(cmd.Context(), "/groups/"+group+"/reminders", w)
 	if err != nil {
 		return err
 	}
-	reminders := []any{}
-	skipped := []map[string]any{}
-	for _, participant := range owingParticipants(snapshot) {
-		data, err := api.Post(cmd.Context(), path, write(map[string]any{"participantToken": participant}))
-		var apiErr *client.Error
-		switch {
-		case errors.As(err, &apiErr) && apiErr.Code() == "RATE_LIMIT_EXCEEDED":
-			skipped = append(skipped, map[string]any{"participantToken": participant, "code": apiErr.Code(), "detail": apiErr.Detail()})
-		case err != nil:
-			return err
-		default:
-			reminders = append(reminders, data)
-		}
+	var result struct {
+		Reminded []any `json:"reminded"`
+		Skipped  []any `json:"skipped"`
 	}
-	return printOK(map[string]any{"reminders": reminders, "skipped": skipped},
-		fmt.Sprintf("%d reminded, %d skipped", len(reminders), len(skipped)))
+	_ = decodeInto(data, &result)
+	return printOK(data, fmt.Sprintf("%d reminded, %d skipped", len(result.Reminded), len(result.Skipped)))
 }
 
-// owingParticipants reads netByCurrency, where a negative balance in any
-// currency means the member owes money.
-func owingParticipants(snapshot map[string]any) []string {
-	owing := map[string]bool{}
-	buckets, _ := snapshot["netByCurrency"].(map[string]any)
-	for _, bucket := range buckets {
-		balances, _ := bucket.(map[string]any)
-		for token, cents := range balances {
-			if value, _ := cents.(float64); value < 0 {
-				owing[token] = true
-			}
+var reminderScheduleShowCmd = &cobra.Command{
+	Use:   "show [GROUP_TOKEN]",
+	Short: "Show when reminders go out",
+	Long:  `Show the group's reminder schedule, or "reminders": "off" when it has none.`,
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		group, err := groupArg(args, 0)
+		if err != nil {
+			return err
 		}
-	}
-	tokens := make([]string, 0, len(owing))
-	for token := range owing {
-		tokens = append(tokens, token)
-	}
-	sort.Strings(tokens)
-	return tokens
+		data, err := api.Get(cmd.Context(), "/groups/"+group+"/reminder_schedule", nil)
+		if absent, err := absentOn404(cmd.Context(), err, groupRecord(group)); absent {
+			return printOK(map[string]any{"token": group, "reminders": "off"}, "Reminders off")
+		} else if err != nil {
+			return err
+		}
+		return printOK(data, "Reminder schedule")
+	},
 }
 
 var reminderWeekday string
@@ -113,6 +94,8 @@ has one.
   weekly --weekday DAY   every week on DAY (sun..sat, or 0..6 with 0 = Sunday)
   monthly --day N        every month on day N (1..28)
   off                    stop scheduled reminders
+
+"reminder schedule show" prints the current schedule.
 
 Turning them on needs a Pro group; otherwise 403 PRO_REQUIRED. Turning them off
 always works, and succeeds when they are already off.`,
@@ -173,6 +156,7 @@ func parseWeekday(value string) (int, error) {
 func init() {
 	rootCmd.AddCommand(reminderCmd, remindCmd)
 	reminderCmd.AddCommand(reminderSendCmd, reminderScheduleCmd)
+	reminderScheduleCmd.AddCommand(reminderScheduleShowCmd)
 	addIdempotencyFlag(reminderSendCmd, remindCmd)
 	for _, cmd := range []*cobra.Command{reminderSendCmd, remindCmd} {
 		cmd.Flags().StringVar(&reminderParticipant, "participant", "", "Remind only this participant token")

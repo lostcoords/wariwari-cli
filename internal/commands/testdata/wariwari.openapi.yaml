@@ -69,6 +69,9 @@ tags:
   - name: transactions
     x-displayName: Transactions
     description: Group expenses and settlement payments.
+  - name: attachments
+    x-displayName: Photos & Files
+    description: Photos and files shared in a group. Uploading needs a Pro group; reading and deleting never do.
   - name: payments
     x-displayName: Payments
     description: Settlements recorded between two participants.
@@ -769,6 +772,138 @@ paths:
           $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      tags:
+        - attachments
+      operationId: listGroupAttachments
+      x-wariwari-paginated: true
+      summary: List a group's photos and files
+      description: |
+        Newest first, with the group's storage usage. Any member can list and
+        download them, with or without Pro.
+      parameters:
+        - name: take
+          in: query
+          required: false
+          description: Number of attachments to return. Defaults to 50; maximum 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor from the previous response.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupAttachmentList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - attachments
+      operationId: createGroupAttachment
+      summary: Share a photo or file in a group
+      description: |
+        Needs a Pro group; otherwise 403 `PRO_REQUIRED`. A file that would take the
+        group past 500 MB, or its sponsor past 2 GB across the groups they cover, is
+        refused with 413 `STORAGE_LIMIT`. A group holds at most 50 files.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GroupAttachmentUpload'
+      responses:
+        '201':
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupAttachment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/StorageLimit'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/groups/{group_token}/attachments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/GroupTokenAsParent'
+      - $ref: '#/components/parameters/AttachmentId'
+    get:
+      tags:
+        - attachments
+      operationId: showGroupAttachment
+      summary: Get one photo or file
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupAttachment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - attachments
+      operationId: deleteGroupAttachment
+      summary: Delete a photo or file
+      description: Works without Pro, so a group that lost Pro can still clean up.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/groups/{group_token}/transactions:
     parameters:
       - $ref: '#/components/parameters/GroupTokenAsParent'
@@ -1080,6 +1215,33 @@ paths:
     parameters:
       - $ref: '#/components/parameters/GroupTokenAsParent'
       - $ref: '#/components/parameters/TransactionToken'
+    get:
+      tags:
+        - transactions
+      operationId: showReceiptPhoto
+      summary: Get an expense's receipt photo
+      description: |
+        Returns a short-lived link to the stored photo, or 404 when the expense has none.
+        Any member can read it, with or without Pro.
+      responses:
+        '200':
+          description: The photo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptPhoto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     put:
       tags:
         - transactions
@@ -1087,7 +1249,9 @@ paths:
       summary: Attach or replace an expense's receipt photo
       description: |
         Stores one photo of the receipt for an expense, replacing any earlier one.
-        Images are re-encoded on upload. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+        Photos are re-encoded to WebP on upload. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+        A photo that would take the group past 500 MB, or its sponsor past 2 GB across the groups
+        they cover, is refused with 413 `STORAGE_LIMIT`.
       requestBody:
         required: true
         content:
@@ -1110,7 +1274,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '413':
-          $ref: '#/components/responses/PayloadTooLarge'
+          $ref: '#/components/responses/StorageLimit'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1132,8 +1296,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1683,6 +1845,31 @@ paths:
   /v1/groups/{group_token}/reminder_schedule:
     parameters:
       - $ref: '#/components/parameters/GroupTokenAsParent'
+    get:
+      tags:
+        - reminders
+      operationId: showReminderSchedule
+      summary: Show a group's balance reminders
+      description: Any member can read when reminders go out. 404 `NOT_FOUND` while reminders are off.
+      responses:
+        '200':
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReminderSchedule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     patch:
       tags:
         - reminders
@@ -1752,23 +1939,33 @@ paths:
       operationId: createReminder
       summary: Remind a member of what they owe
       description: |
-        Sends one member a reminder of their current balance. A member already
-        reminded recently is not reminded again (429 `RATE_LIMIT_EXCEEDED`). Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+        Reminds members of what they owe, by push when they have a registered
+        device and by email otherwise. A group admin can remind anyone who owes;
+        other members only the people who owe them. Each member is reminded at
+        most once a day.
+
+        With `participantToken`, reminds that one member: 403
+        `INSUFFICIENT_PERMISSIONS` when the caller may not remind them, 400
+        `VALIDATION_FAILED` when they owe nothing, have no account or turned
+        reminders off, and 429 `RATE_LIMIT_EXCEEDED` with `Retry-After` when
+        already reminded today. Without it, reminds everyone the caller may remind
+        and lists the rest under `skipped`. Needs a Pro group; otherwise 403
+        `PRO_REQUIRED`.
       parameters:
         - $ref: '#/components/parameters/MutationOperationId'
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/BalanceReminderCreate'
       responses:
-        '201':
+        '200':
           description: Sent
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BalanceReminder'
+                $ref: '#/components/schemas/BalanceReminderResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1890,7 +2087,8 @@ paths:
       operationId: updateRecurringExpense
       summary: Update a recurring expense
       description: |
-        Changes a schedule. Expenses it already posted stay as they are. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
+        Changes a schedule. Expenses it already posted stay as they are. The last write wins: a schedule
+        has no lockVersion. Needs a Pro group; otherwise 403 `PRO_REQUIRED`.
       parameters:
         - $ref: '#/components/parameters/MutationOperationId'
       requestBody:
@@ -1914,8 +2112,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '429':
@@ -2867,7 +3063,7 @@ components:
                 type: string
                 minLength: 1
     Error413:
-      description: JSON API request exceeds the 1 MiB body limit.
+      description: JSON API request exceeds the 1 MiB body limit, or an upload would exceed a storage limit.
       unevaluatedProperties: false
       allOf:
         - $ref: '#/components/schemas/ErrorBase'
@@ -2881,6 +3077,7 @@ components:
               type: string
               enum:
                 - PAYLOAD_TOO_LARGE
+                - STORAGE_LIMIT
     Error429:
       description: |
         Too Many Requests — the short-term request rate limit was exceeded.
@@ -2898,6 +3095,12 @@ components:
               enum:
                 - RATE_LIMIT_EXCEEDED
                 - QUOTA_EXCEEDED
+            upgradeUrl:
+              type: string
+              format: uri
+              description: |
+                Present with `QUOTA_EXCEEDED`. Where a person buys lifetime Pro. The
+                `detail` states the current limit and price; show it as sent.
     Error500:
       description: |
         Internal Server Error — an unexpected server-side failure occurred.
@@ -2931,6 +3134,7 @@ components:
                 - IDEMPOTENCY_IN_PROGRESS
                 - RATE_LIMIT_UNAVAILABLE
                 - RATE_UNAVAILABLE
+                - STORE_UNAVAILABLE
     CliAuthorizationTokenRequest:
       type: object
       additionalProperties: false
@@ -3836,7 +4040,9 @@ components:
             upgradeUrl:
               type: string
               format: uri
-              description: Present with `PRO_REQUIRED`. Where a person buys lifetime Pro.
+              description: |
+                Present with `PRO_REQUIRED`. Where a person buys lifetime Pro. The
+                `detail` states the current price; show it as sent.
     Error404:
       description: Not Found — resource missing or not visible from this request.
       unevaluatedProperties: false
@@ -3996,6 +4202,7 @@ components:
         - id
         - kind
         - transaction
+        - recurring
         - createdAt
         - recordedAt
         - changes
@@ -4054,6 +4261,12 @@ components:
                   description: User's display name at the time of the edit.
           description: |
             Who made the edit. `null` when no actor is available.
+        recurring:
+          type: boolean
+          description: |
+            True on the `create` entry of an expense a recurring expense posted.
+            `actor` is null there; show it as "Recurring". Stays true after the
+            schedule is stopped.
         createdAt:
           type: string
           format: date-time
@@ -4191,6 +4404,98 @@ components:
           type: integer
           minimum: 0
           description: Latest lock version from the participant being updated.
+    GroupAttachment:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - filename
+        - contentType
+        - byteSize
+        - url
+        - thumbnailUrl
+        - uploadedBy
+        - createdAt
+      description: A photo or file shared in a group.
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        filename:
+          type: string
+        contentType:
+          type: string
+        byteSize:
+          type: integer
+          minimum: 0
+        width:
+          type: integer
+          minimum: 1
+          description: Pixels, for a photo whose size is known.
+        height:
+          type: integer
+          minimum: 1
+          description: Pixels, for a photo whose size is known.
+        url:
+          type: string
+          format: uri
+          description: Short-lived link to the stored file.
+        thumbnailUrl:
+          type:
+            - string
+            - 'null'
+          format: uri
+          description: Short-lived link to a square WebP thumbnail; `null` for files that aren't images.
+        uploadedBy:
+          oneOf:
+            - $ref: '#/components/schemas/Token'
+            - type: 'null'
+          description: Token of the member who uploaded it, when known.
+        createdAt:
+          type: string
+          format: date-time
+    StorageUsage:
+      type: object
+      additionalProperties: false
+      required:
+        - usedBytes
+        - limitBytes
+      description: Storage the group's photos, files and receipt photos take, against the group's limit.
+      properties:
+        usedBytes:
+          type: integer
+          minimum: 0
+        limitBytes:
+          type: integer
+          minimum: 1
+    GroupAttachmentList:
+      type: object
+      required:
+        - attachments
+        - storage
+        - pagination
+      properties:
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupAttachment'
+        storage:
+          $ref: '#/components/schemas/StorageUsage'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+    GroupAttachmentUpload:
+      type: object
+      additionalProperties: false
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+          description: |
+            A photo (JPEG, PNG, WebP, HEIC, GIF), PDF, text or CSV file, up to 10 MB.
+            Photos other than GIFs are re-encoded to WebP.
     TransactionList:
       type: object
       required:
@@ -4356,16 +4661,6 @@ components:
           type: integer
           minimum: 0
           description: Latest lock version from the transaction being updated.
-    ReceiptPhotoUpload:
-      type: object
-      additionalProperties: false
-      required:
-        - photo
-      properties:
-        photo:
-          type: string
-          format: binary
-          description: A JPEG, PNG, WebP or HEIC image of the receipt.
     ReceiptPhoto:
       type: object
       additionalProperties: false
@@ -4385,9 +4680,27 @@ components:
         byteSize:
           type: integer
           minimum: 1
+        width:
+          type: integer
+          minimum: 1
+          description: Pixels. Absent until known for a photo stored before re-encoding.
+        height:
+          type: integer
+          minimum: 1
+          description: Pixels. Absent until known for a photo stored before re-encoding.
         createdAt:
           type: string
           format: date-time
+    ReceiptPhotoUpload:
+      type: object
+      additionalProperties: false
+      required:
+        - photo
+      properties:
+        photo:
+          type: string
+          format: binary
+          description: A JPEG, PNG, WebP or HEIC image of the receipt.
     BulkEditInput:
       type: object
       additionalProperties: false
@@ -4842,27 +5155,6 @@ components:
               $ref: '#/components/schemas/StatsDelta'
             topCategory:
               $ref: '#/components/schemas/StatsDelta'
-    ReminderScheduleUpdate:
-      type: object
-      additionalProperties: false
-      required:
-        - cadence
-      properties:
-        cadence:
-          type: string
-          enum:
-            - weekly
-            - monthly
-        weekday:
-          type: integer
-          minimum: 0
-          maximum: 6
-          description: Required for `weekly`; 0 = Sunday.
-        day:
-          type: integer
-          minimum: 1
-          maximum: 28
-          description: Required for `monthly`.
     ReminderSchedule:
       type: object
       additionalProperties: false
@@ -4870,6 +5162,7 @@ components:
         - cadence
         - weekday
         - day
+        - nextRunOn
         - updatedAt
       description: When a group's members who owe money get reminded.
       properties:
@@ -4892,17 +5185,42 @@ components:
           minimum: 1
           maximum: 28
           description: Day of the month for `monthly`. `null` for `weekly`.
+        nextRunOn:
+          type: string
+          format: date
+          description: The Tokyo date of the next reminder run, which goes out at 9:00 Tokyo time.
         updatedAt:
           type: string
           format: date-time
-    BalanceReminderCreate:
+    ReminderScheduleUpdate:
       type: object
       additionalProperties: false
       required:
-        - participantToken
+        - cadence
+      properties:
+        cadence:
+          type: string
+          enum:
+            - weekly
+            - monthly
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Required for `weekly`; 0 = Sunday.
+        day:
+          type: integer
+          minimum: 1
+          maximum: 28
+          description: Required for `monthly`.
+    BalanceReminderCreate:
+      type: object
+      additionalProperties: false
       properties:
         participantToken:
-          $ref: '#/components/schemas/Token'
+          allOf:
+            - $ref: '#/components/schemas/Token'
+          description: The member to remind. Omit it to remind everyone who owes and whom the caller may remind.
     BalanceReminder:
       type: object
       additionalProperties: false
@@ -4929,6 +5247,39 @@ components:
         sentAt:
           type: string
           format: date-time
+    BalanceReminderResult:
+      type: object
+      additionalProperties: false
+      required:
+        - reminded
+        - skipped
+      description: Who was reminded, and who owes but was not, with the reason.
+      properties:
+        reminded:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceReminder'
+        skipped:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - participantToken
+              - reason
+            properties:
+              participantToken:
+                $ref: '#/components/schemas/Token'
+              reason:
+                type: string
+                enum:
+                  - unlinked
+                  - opted_out
+                  - recently_reminded
+                description: |
+                  `unlinked`: the member has no account to reach. `opted_out`: they turned
+                  balance reminders off or muted the group. `recently_reminded`: already
+                  reminded within the last day (or 3 days, by the schedule).
     RecurringExpense:
       type: object
       additionalProperties: false
@@ -5171,7 +5522,6 @@ components:
         interval:
           type: integer
           minimum: 1
-          default: 1
         startsOn:
           type: string
           format: date
@@ -5503,8 +5853,9 @@ components:
         - invitationAccepted
         - accessRequested
         - accessApproved
+        - balanceReminder
       description: |
-        Per-event push-notification toggles for the signed-in user. Every event is
+        Per-event notification toggles for the signed-in user. Every event is
         on unless explicitly turned off.
       properties:
         newExpense:
@@ -5517,6 +5868,9 @@ components:
           type: boolean
         accessApproved:
           type: boolean
+        balanceReminder:
+          type: boolean
+          description: Reminders of what the user owes, by push or, without a registered device, by email.
     Account:
       type: object
       required:
@@ -5606,6 +5960,8 @@ components:
             accessRequested:
               type: boolean
             accessApproved:
+              type: boolean
+            balanceReminder:
               type: boolean
     FeedbackCreate:
       type: object
@@ -5748,6 +6104,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error409'
+    StorageLimit:
+      description: The upload would take the group or its Pro sponsor past their storage limit (`STORAGE_LIMIT`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error413'
   parameters:
     MutationOperationId:
       name: Idempotency-Key
@@ -5806,6 +6168,14 @@ components:
       description: Participant token.
       schema:
         $ref: '#/components/schemas/Token'
+    AttachmentId:
+      name: id
+      in: path
+      required: true
+      description: Attachment id, from the group's attachment list.
+      schema:
+        type: integer
+        minimum: 1
     TransactionToken:
       name: transaction_token
       in: path
@@ -5855,6 +6225,7 @@ x-tagGroups:
       - participants
       - categories
       - transactions
+      - attachments
       - payments
       - reminders
       - recurring_expenses

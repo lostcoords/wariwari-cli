@@ -3,6 +3,8 @@
 BINARY := $(CURDIR)/bin/wariwari
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
+# The server checkout whose spec the CLI follows; spec_test.go reads it too.
+export WARIWARI_SERVER ?= ../wariwari
 
 .DEFAULT_GOAL := check
 
@@ -31,7 +33,7 @@ check: fmt-check vet test-unit
 
 # Refresh the vendored API contract the tests check commands against.
 sync-spec:
-	cp ../wariwari/openapi/dist/wariwari.bundled.yaml internal/commands/testdata/wariwari.openapi.yaml
+	cp $(WARIWARI_SERVER)/openapi/dist/wariwari.bundled.yaml internal/commands/testdata/wariwari.openapi.yaml
 
 clean:
 	rm -rf bin dist

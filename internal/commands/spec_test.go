@@ -16,8 +16,18 @@ import (
 // checkout. Refresh it with `make sync-spec`.
 const vendoredSpec = "testdata/wariwari.openapi.yaml"
 
-// serverSpec is the server checkout's bundle, when it sits beside this repo.
-var serverSpec = filepath.Join("..", "..", "..", "wariwari", "openapi", "dist", "wariwari.bundled.yaml")
+// serverSpec is the server checkout's bundle: WARIWARI_SERVER, relative to the
+// repo root, or the checkout beside this repo.
+func serverSpec() string {
+	server := os.Getenv("WARIWARI_SERVER")
+	if server == "" {
+		server = filepath.Join("..", "wariwari")
+	}
+	if !filepath.IsAbs(server) {
+		server = filepath.Join("..", "..", server)
+	}
+	return filepath.Join(server, "openapi", "dist", "wariwari.bundled.yaml")
+}
 
 // Operations the CLI deliberately does not wrap, with the reason.
 var unwrappedOperations = map[string]string{
@@ -164,11 +174,11 @@ func TestEveryPublicOperationHasACommand(t *testing.T) {
 // Fails when the server's bundle changed an operation, path or header since
 // the vendored copy; run `make sync-spec` and update the commands.
 func TestVendoredSpecMatchesTheServer(t *testing.T) {
-	if _, err := os.Stat(serverSpec); err != nil {
-		t.Skip("server checkout not found beside this repo")
+	if _, err := os.Stat(serverSpec()); err != nil {
+		t.Skip("server checkout not found; set WARIWARI_SERVER")
 	}
 	vendored := loadOperations(t, vendoredSpec)
-	server := loadOperations(t, serverSpec)
+	server := loadOperations(t, serverSpec())
 	if !reflect.DeepEqual(vendored, server) {
 		for id, op := range server {
 			if !reflect.DeepEqual(vendored[id], op) {
@@ -180,6 +190,6 @@ func TestVendoredSpecMatchesTheServer(t *testing.T) {
 				t.Errorf("%s: removed from the server spec", id)
 			}
 		}
-		t.Fatal("vendored spec is stale; run `make sync-spec`")
+		t.Fatalf("vendored spec differs from %s; run `make sync-spec`", serverSpec())
 	}
 }

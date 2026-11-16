@@ -93,13 +93,12 @@ func printErr(err error) {
 			fmt.Fprintln(errOut, "  Re-read the record and retry with the lockVersion from `current`.")
 		case apiErr.Code() == "CONFLICT":
 			fmt.Fprintln(errOut, "  Re-read the record and retry with its latest lockVersion.")
-		case apiErr.Code() == "PRO_REQUIRED":
-			fmt.Fprintln(errOut, "  This is a Pro feature. Pro is ¥980, paid once, and lasts for life.")
+		case apiErr.Code() == "PRO_REQUIRED" || apiErr.Code() == "QUOTA_EXCEEDED":
+			// The server's detail states the price and limit; the CLI adds only
+			// where to buy Pro and when a quota resets.
 			if url, _ := apiErr.Body["upgradeUrl"].(string); url != "" {
 				fmt.Fprintf(errOut, "  Upgrade at %s\n", url)
 			}
-		case apiErr.Code() == "QUOTA_EXCEEDED":
-			fmt.Fprintln(errOut, "  A free account's API key gets 50 read calls a month, and writes need Pro (¥980, paid once).")
 			if wait, err := strconv.Atoi(apiErr.RetryAfter); err == nil {
 				fmt.Fprintf(errOut, "  The quota resets in %s.\n", roughDuration(time.Duration(wait)*time.Second))
 			}
@@ -211,7 +210,7 @@ func jsonShape(v any) (any, error) {
 
 // collectionKeys are the camelCase array fields the API nests rows under, in
 // the order --count and --ids-only should prefer them.
-var collectionKeys = []string{"groups", "transactions", "participants", "groupCategories", "activity", "suggestedPayments", "accessRequests", "recurringExpenses", "reminders"}
+var collectionKeys = []string{"groups", "transactions", "participants", "groupCategories", "activity", "suggestedPayments", "accessRequests", "recurringExpenses", "reminded", "attachments"}
 
 func countData(v any) int {
 	switch data := v.(type) {

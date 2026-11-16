@@ -17,86 +17,101 @@ func proTestConfig() *config.Config {
 	return &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
 }
 
-func TestProRequiredSaysWhatProCostsAndWhereToBuyIt(t *testing.T) {
-	handler := func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"title":"Pro required","status":403,"code":"PRO_REQUIRED",
-			"detail":"Recurring expenses need a Pro group.","upgradeUrl":"https://wariwari.jp/pricing"}`))
+// The server's detail carries the price and limit, so a change to either
+// never needs a CLI release; the CLI adds the upgrade link.
+func TestProErrorsShowTheServerDetailAndUpgradeLink(t *testing.T) {
+	tests := []struct {
+		name, status, body string
+		retryAfter         string
+		args               []string
+		want               []string
+	}{
+		{"pro required", "403", `{"status":403,"code":"PRO_REQUIRED","detail":"Recurring expenses need Pro: ¥980, once.","upgradeUrl":"https://wariwari.jp/pricing"}`, "",
+			[]string{"recurring", "create", "grp_1", "--data", `{"description":"Rent"}`},
+			[]string{"Recurring expenses need Pro: ¥980, once.", "Upgrade at https://wariwari.jp/pricing"}},
+		{"quota exceeded", "429", `{"status":429,"code":"QUOTA_EXCEEDED","detail":"Free keys get 50 calls a month.","upgradeUrl":"https://wariwari.jp/pricing"}`, "432000",
+			[]string{"group", "list"},
+			[]string{"Free keys get 50 calls a month.", "Upgrade at https://wariwari.jp/pricing", "resets in 5 days"}},
 	}
-	args := []string{"recurring", "create", "grp_1", "--data", `{"description":"Rent"}`, "--every", "monthly", "--starts", "2026-12-01"}
-
-	_, stderr, _, err := runRootCommand(t, proTestConfig(), handler, args...)
-	if err == nil {
-		t.Fatal("expected a 403 error")
-	}
-	for _, want := range []string{"Recurring expenses need a Pro group.", "Pro feature", "¥980, paid once", "Upgrade at https://wariwari.jp/pricing"} {
-		if !strings.Contains(err.Error()+stderr, want) {
-			t.Fatalf("output missing %q:\nerr: %v\nstderr: %s", want, err, stderr)
-		}
-	}
-
-	stdout, _, _, _ := runRootCommand(t, proTestConfig(), handler, append(args, "--json")...)
-	for _, want := range []string{`"code": "PRO_REQUIRED"`, `"upgradeUrl": "https://wariwari.jp/pricing"`} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("JSON error missing %s:\n%s", want, stdout)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if tt.retryAfter != "" {
+					w.Header().Set("Retry-After", tt.retryAfter)
+				}
+				status := http.StatusForbidden
+				if tt.status == "429" {
+					status = http.StatusTooManyRequests
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(tt.body))
+			}
+			_, stderr, _, err := runRootCommand(t, proTestConfig(), handler, tt.args...)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error()+"\n"+stderr, want) {
+					t.Fatalf("output missing %q:\nerr: %v\nstderr: %s", want, err, stderr)
+				}
+			}
+			stdout, _, _, _ := runRootCommand(t, proTestConfig(), handler, append(tt.args, "--json")...)
+			if !strings.Contains(stdout, `"upgradeUrl": "https://wariwari.jp/pricing"`) {
+				t.Fatalf("JSON error missing upgradeUrl:\n%s", stdout)
+			}
+		})
 	}
 }
 
-func TestQuotaExceededExplainsTheFreeKeyLimit(t *testing.T) {
+func TestRemindPrintsWhoWasRemindedAndWhoWasSkipped(t *testing.T) {
 	handler := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Retry-After", "432000")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"title":"Quota exceeded","status":429,"code":"QUOTA_EXCEEDED"}`))
+		_, _ = w.Write([]byte(`{"reminded":[{"participantToken":"part_a","channel":"push","amountCents":4000,"currency":"JPY","sentAt":"2026-11-16T10:00:00Z"}],
+			"skipped":[{"participantToken":"part_b","reason":"opted_out"},{"participantToken":"part_c","reason":"recently_reminded"}]}`))
 	}
-	_, stderr, _, err := runRootCommand(t, proTestConfig(), handler, "group", "list")
-	if err == nil {
-		t.Fatal("expected a 429 error")
-	}
-	for _, want := range []string{"50 read calls a month", "writes need Pro", "resets in 5 days"} {
-		if !strings.Contains(stderr, want) {
-			t.Fatalf("stderr missing %q:\n%s", want, stderr)
-		}
-	}
-}
-
-// Without --participant, everyone the snapshot shows owing money is reminded;
-// one reminded too recently is skipped rather than failing the rest.
-func TestRemindWithoutAParticipantRemindsEveryoneWhoOwes(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			_, _ = w.Write([]byte(`{"token":"grp_1","netByCurrency":{
-				"JPY":{"part_a":-4000,"part_b":4000,"part_c":0},
-				"USD":{"part_b":-100,"part_d":-50}}}`))
-			return
-		}
-		body, _ := io.ReadAll(r.Body)
-		if strings.Contains(string(body), "part_d") {
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"status":429,"code":"RATE_LIMIT_EXCEEDED","detail":"Reminded recently."}`))
-			return
-		}
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write(append([]byte(`{"channel":"email","echo":`), append(body, '}')...))
-	}
-	stdout, _, requests, err := runRootCommand(t, proTestConfig(), handler, "remind", "grp_1", "--json")
+	stdout, _, _, err := runRootCommand(t, proTestConfig(), handler, "remind", "grp_1", "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var posted []string
-	for _, r := range requests[1:] {
-		posted = append(posted, r.Body)
-	}
-	want := []string{`{"participantToken":"part_a"}`, `{"participantToken":"part_b"}`, `{"participantToken":"part_d"}`}
-	if strings.Join(posted, " ") != strings.Join(want, " ") {
-		t.Fatalf("posted %v, want %v", posted, want)
-	}
-	for _, want := range []string{`"summary": "2 reminded, 1 skipped"`, `"code": "RATE_LIMIT_EXCEEDED"`} {
+	for _, want := range []string{`"summary": "1 reminded, 2 skipped"`, `"reason": "opted_out"`, `"reason": "recently_reminded"`} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("output missing %s:\n%s", want, stdout)
+		}
+	}
+}
+
+// Both "none here" and "no such group or expense" are 404; only the first is
+// reported as an empty result.
+func TestA404IsAbsenceOnlyWhenTheParentExists(t *testing.T) {
+	notFound := func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"status":404,"code":"NOT_FOUND"}`))
+	}
+	parentExists := func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/reminder_schedule") || strings.HasSuffix(r.URL.Path, "/receipt_photo") {
+			notFound(w)
+			return
+		}
+		contractHandler(w, r)
+	}
+	nothingExists := func(w http.ResponseWriter, _ *http.Request) { notFound(w) }
+
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"reminder", "schedule", "show", "grp_1"}, `"reminders": "off"`},
+		{[]string{"transaction", "receipt", "show", "txn_1", "grp_1"}, `"receiptPhoto": null`},
+	}
+	for _, tt := range tests {
+		stdout, _, _, err := runRootCommand(t, proTestConfig(), parentExists, append(tt.args, "--json")...)
+		if err != nil || !strings.Contains(stdout, tt.want) {
+			t.Fatalf("%v: err = %v, output missing %s:\n%s", tt.args, err, tt.want, stdout)
+		}
+		if _, _, _, err := runRootCommand(t, proTestConfig(), nothingExists, tt.args...); err == nil || !strings.Contains(err.Error(), "NOT_FOUND") {
+			t.Fatalf("%v: err = %v, want NOT_FOUND for a missing parent", tt.args, err)
 		}
 	}
 }
@@ -107,7 +122,6 @@ func TestReminderScheduleChecksItsDayBeforeCalling(t *testing.T) {
 		{"reminder", "schedule", "weekly", "grp_1", "--weekday", "7"},
 		{"reminder", "schedule", "monthly", "grp_1", "--day", "31"},
 		{"reminder", "schedule", "daily", "grp_1"},
-		{"remind", "grp_1", "--idempotency-key", "1b4e28ba-2fa1-11d2-883f-0016d3cca427"},
 	} {
 		_, _, requests, err := runRootCommand(t, proTestConfig(), contractHandler, args...)
 		if err == nil || len(requests) != 0 {
@@ -116,24 +130,32 @@ func TestReminderScheduleChecksItsDayBeforeCalling(t *testing.T) {
 	}
 }
 
-func TestReceiptUploadSendsThePhotoAsMultipart(t *testing.T) {
-	_, _, requests, err := runRootCommand(t, proTestConfig(), contractHandler,
-		"transaction", "receipt", "upload", "txn_1", "testdata/receipt.jpg", "grp_1")
-	if err != nil {
-		t.Fatal(err)
+func TestUploadsSendTheFileAsMultipart(t *testing.T) {
+	tests := []struct {
+		args  []string
+		field string
+	}{
+		{[]string{"transaction", "receipt", "upload", "txn_1", "testdata/receipt.jpg", "grp_1"}, "photo"},
+		{[]string{"file", "upload", "testdata/receipt.jpg", "grp_1"}, "file"},
 	}
-	mediaType, params, err := mime.ParseMediaType(requests[0].Header.Get("Content-Type"))
-	if err != nil || mediaType != "multipart/form-data" {
-		t.Fatalf("Content-Type = %q", requests[0].Header.Get("Content-Type"))
-	}
-	part, err := multipart.NewReader(strings.NewReader(requests[0].Body), params["boundary"]).NextPart()
-	if err != nil {
-		t.Fatal(err)
-	}
-	content, _ := io.ReadAll(part)
 	original, _ := os.ReadFile("testdata/receipt.jpg")
-	if part.FormName() != "photo" || part.FileName() != "receipt.jpg" || part.Header.Get("Content-Type") != "image/jpeg" || !bytes.Equal(content, original) {
-		t.Fatalf("part %q %q %q with %d bytes", part.FormName(), part.FileName(), part.Header.Get("Content-Type"), len(content))
+	for _, tt := range tests {
+		_, _, requests, err := runRootCommand(t, proTestConfig(), contractHandler, tt.args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mediaType, params, err := mime.ParseMediaType(requests[0].Header.Get("Content-Type"))
+		if err != nil || mediaType != "multipart/form-data" {
+			t.Fatalf("%v: Content-Type = %q", tt.args, requests[0].Header.Get("Content-Type"))
+		}
+		part, err := multipart.NewReader(strings.NewReader(requests[0].Body), params["boundary"]).NextPart()
+		if err != nil {
+			t.Fatal(err)
+		}
+		content, _ := io.ReadAll(part)
+		if part.FormName() != tt.field || part.FileName() != "receipt.jpg" || part.Header.Get("Content-Type") != "image/jpeg" || !bytes.Equal(content, original) {
+			t.Fatalf("%v: part %q %q %q with %d bytes", tt.args, part.FormName(), part.FileName(), part.Header.Get("Content-Type"), len(content))
+		}
 	}
 }
 

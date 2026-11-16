@@ -80,10 +80,10 @@ wariwari auth login wari_xxxxxxxx
 WARIWARI_TOKEN=wari_xxxxxxxx wariwari group list
 ```
 
-On a Pro account (lifetime, ¥980) a developer key can do everything the CLI
-offers, including creating groups (20 an hour), with no monthly quota. On a
-free account the key only reads, 50 calls a month; writes answer
-`403 PRO_REQUIRED` and the CLI prints where to upgrade. Short-term per-IP and
+Free API keys can read with a monthly limit; writes need wariwari Pro. The
+server's error says the current price and limit, and the CLI prints it with
+where to upgrade. On a Pro account a developer key can do everything the CLI
+offers, including creating groups (20 an hour). Short-term per-IP and
 per-credential rate limits apply either way. `wariwari account show` says
 whether the account is Pro.
 
@@ -270,19 +270,24 @@ categories.
 
 ## Pro group features
 
-Reminders, recurring expenses and receipt photos need a Pro group, one where a
+Reminders, recurring expenses, receipt photo uploads and shared files need a Pro group, one where a
 linked member holds Pro (`pro` on the group snapshot).
 
 ```bash
 wariwari remind GROUP_TOKEN                                   # everyone who owes money
 wariwari remind GROUP_TOKEN --participant PARTICIPANT_TOKEN
 wariwari reminder schedule weekly GROUP_TOKEN --weekday mon   # or: monthly --day 25, off
+wariwari reminder schedule show GROUP_TOKEN
 wariwari recurring list GROUP_TOKEN
 wariwari recurring create GROUP_TOKEN --data-file rent.json --every monthly --starts 2026-12-01
 wariwari recurring update RECURRING_TOKEN GROUP_TOKEN --interval 2
 wariwari recurring delete RECURRING_TOKEN GROUP_TOKEN
 wariwari transaction receipt upload TRANSACTION_TOKEN receipt.jpg GROUP_TOKEN
+wariwari transaction receipt show TRANSACTION_TOKEN GROUP_TOKEN
 wariwari transaction receipt delete TRANSACTION_TOKEN GROUP_TOKEN
+wariwari file list GROUP_TOKEN                                # shared photos and files, with storage use
+wariwari file upload photo.jpg GROUP_TOKEN
+wariwari file delete FILE_ID GROUP_TOKEN
 ```
 
 A recurring expense takes the expense fields of `transaction create` as JSON,

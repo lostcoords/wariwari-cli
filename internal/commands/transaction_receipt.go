@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,7 +13,7 @@ import (
 
 var transactionReceiptCmd = &cobra.Command{
 	Use:   "receipt",
-	Short: "Attach or remove an expense's receipt photo (Pro groups)",
+	Short: "Show, attach or remove an expense's receipt photo",
 }
 
 var transactionReceiptUploadCmd = &cobra.Command{
@@ -28,20 +29,37 @@ PRO_REQUIRED.`,
 		if err != nil {
 			return err
 		}
-		content, err := os.ReadFile(args[1])
+		file, err := uploadFile("photo", args[1])
 		if err != nil {
 			return err
 		}
-		data, err := api.PutFile(cmd.Context(), receiptPath(group, args[0]), client.File{
-			Field:       "photo",
-			Name:        filepath.Base(args[1]),
-			ContentType: imageType(args[1], content),
-			Content:     content,
-		})
+		data, err := api.Upload(cmd.Context(), http.MethodPut, receiptPath(group, args[0]), file)
 		if err != nil {
 			return err
 		}
 		return printOK(data, "Receipt photo stored")
+	},
+}
+
+var transactionReceiptShowCmd = &cobra.Command{
+	Use:     "show TRANSACTION_TOKEN [GROUP_TOKEN]",
+	Aliases: []string{"view"},
+	Short:   "Show an expense's receipt photo",
+	Long: `Show the receipt photo with a short-lived url, or "receiptPhoto": null when
+the expense has none. Any member can read it, with or without Pro.`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		group, err := groupArg(args, 1)
+		if err != nil {
+			return err
+		}
+		data, err := api.Get(cmd.Context(), receiptPath(group, args[0]), nil)
+		if absent, err := absentOn404(cmd.Context(), err, transactionRecord(group, args[0])); absent {
+			return printOK(map[string]any{"transactionToken": args[0], "receiptPhoto": nil}, "No receipt photo")
+		} else if err != nil {
+			return err
+		}
+		return printOK(data, "Receipt photo")
 	},
 }
 
@@ -67,17 +85,26 @@ func receiptPath(group, transaction string) string {
 	return "/groups/" + group + "/transactions/" + transaction + "/receipt_photo"
 }
 
-// imageType names the upload's media type. Go sniffs JPEG, PNG and WebP but
-// not HEIC, the iPhone camera's format, which goes by its extension.
-func imageType(name string, content []byte) string {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".heic", ".heif":
-		return "image/heic"
+// uploadFile reads a file for a multipart upload and names its media type:
+// by extension first, then by sniffing. HEIC, the iPhone camera's format, is
+// in neither Go's table nor its sniffer.
+func uploadFile(field, path string) (client.File, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return client.File{}, err
 	}
-	return http.DetectContentType(content)
+	ext := strings.ToLower(filepath.Ext(path))
+	contentType := mime.TypeByExtension(ext)
+	switch {
+	case ext == ".heic" || ext == ".heif":
+		contentType = "image/heic"
+	case contentType == "":
+		contentType = http.DetectContentType(content)
+	}
+	return client.File{Field: field, Name: filepath.Base(path), ContentType: contentType, Content: content}, nil
 }
 
 func init() {
 	transactionCmd.AddCommand(transactionReceiptCmd)
-	transactionReceiptCmd.AddCommand(transactionReceiptUploadCmd, transactionReceiptDeleteCmd)
+	transactionReceiptCmd.AddCommand(transactionReceiptShowCmd, transactionReceiptUploadCmd, transactionReceiptDeleteCmd)
 }

@@ -104,12 +104,15 @@ var contracts = []contract{
 	{name: "transaction bulk-delete", args: []string{"transaction", "bulk-delete", "grp_1", "--data", `{"transactionTokens":["txn_1"],"lockVersions":{"txn_1":2}}`}, operation: "bulkDeleteTransactions", method: "DELETE", path: "/v1/groups/grp_1/transaction_bulk_edit"},
 
 	{name: "transaction receipt upload", args: []string{"transaction", "receipt", "upload", "txn_1", "testdata/receipt.jpg", "grp_1"}, operation: "updateReceiptPhoto", method: "PUT", path: "/v1/groups/grp_1/transactions/txn_1/receipt_photo"},
+	{name: "transaction receipt show", args: []string{"transaction", "receipt", "show", "txn_1", "grp_1"}, operation: "showReceiptPhoto", method: "GET", path: "/v1/groups/grp_1/transactions/txn_1/receipt_photo"},
 	{name: "expense is transaction", args: []string{"expense", "receipt", "delete", "txn_1", "grp_1"}, operation: "deleteReceiptPhoto", method: "DELETE", path: "/v1/groups/grp_1/transactions/txn_1/receipt_photo"},
 
 	{name: "reminder send", args: []string{"reminder", "send", "grp_1", "--participant", "part_1"}, operation: "createReminder", method: "POST", path: "/v1/groups/grp_1/reminders"},
 	{name: "remind is reminder send", args: []string{"remind", "grp_1", "--participant", "part_1"}, operation: "createReminder", method: "POST", path: "/v1/groups/grp_1/reminders"},
 	{name: "reminder schedule weekly", args: []string{"reminder", "schedule", "weekly", "grp_1", "--weekday", "mon"}, operation: "updateReminderSchedule", method: "PATCH", path: "/v1/groups/grp_1/reminder_schedule"},
 	{name: "reminder schedule monthly", args: []string{"reminders", "schedule", "monthly", "grp_1", "--day", "25"}, operation: "updateReminderSchedule", method: "PATCH", path: "/v1/groups/grp_1/reminder_schedule"},
+	{name: "reminder schedule show", args: []string{"reminder", "schedule", "show", "grp_1"}, operation: "showReminderSchedule", method: "GET", path: "/v1/groups/grp_1/reminder_schedule"},
+	{name: "reminder send to everyone who owes", args: []string{"remind", "grp_1"}, operation: "createReminder", method: "POST", path: "/v1/groups/grp_1/reminders"},
 	{name: "reminder schedule off", args: []string{"reminder", "schedule", "off", "grp_1"}, operation: "deleteReminderSchedule", method: "DELETE", path: "/v1/groups/grp_1/reminder_schedule"},
 
 	{name: "recurring list", args: []string{"recurring", "list", "grp_1"}, operation: "listRecurringExpenses", method: "GET", path: "/v1/groups/grp_1/recurring_expenses"},
@@ -117,6 +120,11 @@ var contracts = []contract{
 	{name: "recurring create", args: []string{"recurring", "add", "grp_1", "--data", `{"description":"Rent"}`, "--every", "monthly", "--starts", "2026-12-01"}, operation: "createRecurringExpense", method: "POST", path: "/v1/groups/grp_1/recurring_expenses"},
 	{name: "recurring update", args: []string{"recurring", "update", "rec_1", "grp_1", "--interval", "2"}, operation: "updateRecurringExpense", method: "PATCH", path: "/v1/groups/grp_1/recurring_expenses/rec_1"},
 	{name: "recurring delete", args: []string{"recurring", "rm", "rec_1", "grp_1"}, operation: "deleteRecurringExpense", method: "DELETE", path: "/v1/groups/grp_1/recurring_expenses/rec_1"},
+
+	{name: "file list", args: []string{"file", "list", "grp_1", "--take", "10"}, operation: "listGroupAttachments", method: "GET", path: "/v1/groups/grp_1/attachments?take=10"},
+	{name: "file show", args: []string{"files", "show", "12", "grp_1"}, operation: "showGroupAttachment", method: "GET", path: "/v1/groups/grp_1/attachments/12"},
+	{name: "file upload", args: []string{"file", "upload", "testdata/receipt.jpg", "grp_1"}, operation: "createGroupAttachment", method: "POST", path: "/v1/groups/grp_1/attachments"},
+	{name: "file delete", args: []string{"file", "rm", "12", "grp_1"}, operation: "deleteGroupAttachment", method: "DELETE", path: "/v1/groups/grp_1/attachments/12"},
 
 	{name: "payment create", args: []string{"payment", "create", "grp_1", "--data", `{"fromToken":"part_1","toToken":"part_2","amountCents":100}`}, operation: "createPayment", method: "POST", path: "/v1/groups/grp_1/payments"},
 	{name: "payment update", args: []string{"payment", "update", "txn_1", "grp_1", "--data", `{"lockVersion":0}`}, operation: "updatePayment", method: "PATCH", path: "/v1/groups/grp_1/payments/txn_1"},
@@ -181,6 +189,7 @@ func TestWriteBodiesMatchTheSpec(t *testing.T) {
 		{"invitation create defaults to an empty body", []string{"invitation", "create", "grp_1"}, `{}`},
 		{"feedback joins the message", []string{"feedback", "Love", "it"}, `{"body":"Love it"}`},
 		{"reminder send names the participant", []string{"remind", "grp_1", "--participant", "part_1"}, `{"participantToken":"part_1"}`},
+		{"reminding everyone sends no body", []string{"remind", "grp_1"}, ``},
 		{"weekly reminders take a weekday name", []string{"reminder", "schedule", "weekly", "grp_1", "--weekday", "Monday"}, `{"cadence":"weekly","weekday":1}`},
 		{"monthly reminders take a day", []string{"reminder", "schedule", "monthly", "grp_1", "--day", "25"}, `{"cadence":"monthly","day":25}`},
 		{"recurring flags override the body", []string{"recurring", "create", "grp_1", "--data", `{"description":"Rent","cadence":"weekly"}`, "--every", "monthly", "--interval", "3", "--starts", "2026-12-01"}, `{"cadence":"monthly","description":"Rent","interval":3,"startsOn":"2026-12-01"}`},
@@ -213,6 +222,7 @@ func TestNoContentWritesReportTheirOwnResult(t *testing.T) {
 		{[]string{"access-request", "decline", "7", "grp_1"}, `"declined": true`},
 		{[]string{"recurring", "delete", "rec_1", "grp_1"}, `"deleted": true`},
 		{[]string{"reminder", "schedule", "off", "grp_1"}, `"reminders": "off"`},
+		{[]string{"file", "delete", "12", "grp_1"}, `"deleted": true`},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args[:2], " "), func(t *testing.T) {

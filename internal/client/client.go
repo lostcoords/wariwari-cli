@@ -133,9 +133,8 @@ type File struct {
 	Content     []byte
 }
 
-// PutFile replaces a resource with an uploaded file, sent as
-// multipart/form-data. It is the API's only PUT.
-func (c *Client) PutFile(ctx context.Context, path string, file File) (any, error) {
+// Upload sends one file as multipart/form-data.
+func (c *Client) Upload(ctx context.Context, method, path string, file File) (any, error) {
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	part := textproto.MIMEHeader{}
@@ -151,7 +150,7 @@ func (c *Client) PutFile(ctx context.Context, path string, file File) (any, erro
 	if err := form.Close(); err != nil {
 		return nil, err
 	}
-	return c.decode(c.send(ctx, http.MethodPut, path, nil, &body, http.Header{"Content-Type": {form.FormDataContentType()}}))
+	return c.decode(c.send(ctx, method, path, nil, &body, http.Header{"Content-Type": {form.FormDataContentType()}}))
 }
 
 // GetRaw fetches a non-JSON body, such as the CSV export.
