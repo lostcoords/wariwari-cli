@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lostcoords/wariwari-cli/internal/config"
 )
@@ -128,7 +129,7 @@ var contracts = []contract{
 	{name: "payment update is a transaction", args: []string{"payment", "update", "txn_1", "grp_1", "--data", `{"amountCents":200}`, "--lock-version", "0"}, operation: "updateTransaction", method: "PATCH", path: "/v1/groups/grp_1/transactions/txn_1", headers: map[string]string{"Expected-Revision": "0"}},
 
 	{name: "invitation list", args: []string{"invitation", "list", "grp_1"}, operation: "listInvitations", method: "GET", path: "/v1/groups/grp_1/invitations"},
-	{name: "invitation create", args: []string{"invitation", "create", "grp_1", "--role", "editor", "--expires-at", "2026-12-31T23:59:00+09:00"}, operation: "createInvitation", method: "POST", path: "/v1/groups/grp_1/invitations"},
+	{name: "invitation create", args: []string{"invitation", "create", "grp_1", "--role", "editor", "--expires-in", "7d"}, operation: "createInvitation", method: "POST", path: "/v1/groups/grp_1/invitations"},
 	{name: "invitation revoke", args: []string{"invitation", "revoke", "inv_1", "grp_1"}, operation: "revokeInvitation", method: "DELETE", path: "/v1/groups/grp_1/invitations/inv_1"},
 	{name: "invitation accept", args: []string{"invitation", "accept", "inv_1", "grp_1"}, operation: "acceptInvitation", method: "POST", path: "/v1/groups/grp_1/invitations/inv_1/acceptance"},
 	{name: "access-request status", args: []string{"access-request", "status", "grp_1"}, operation: "showAccessRequest", method: "GET", path: "/v1/groups/grp_1/access_request"},
@@ -177,13 +178,15 @@ func TestCommandContractsUseCurrentAPIRoutes(t *testing.T) {
 }
 
 func TestWriteBodiesMatchTheSpec(t *testing.T) {
+	invitationNow = func() time.Time { return time.Date(2026, 12, 1, 9, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { invitationNow = time.Now })
 	tests := []struct {
 		name string
 		args []string
 		want string
 	}{
 		{"account update is flat", []string{"account", "update", "--data", `{"name":"Ada"}`}, `{"name":"Ada"}`},
-		{"invitation create sends role and expiry", []string{"invitation", "create", "grp_1", "--role", "read_only", "--expires-at", "2026-12-31T23:59:00+09:00"}, `{"expiresAt":"2026-12-31T23:59:00+09:00","membershipRole":"read_only"}`},
+		{"invitation create turns --expires-in into a date-time", []string{"invitation", "create", "grp_1", "--role", "read_only", "--expires-in", "7d"}, `{"expiresAt":"2026-12-08T09:00:00Z","membershipRole":"read_only"}`},
 		{"payment create names its kind", []string{"payment", "create", "grp_1", "--data", `{"fromParticipantToken":"part_1","toParticipantToken":"part_2","amountCents":100}`}, `{"amountCents":100,"fromParticipantToken":"part_1","kind":"payment","toParticipantToken":"part_2"}`},
 		{"payment update names its kind", []string{"payment", "update", "txn_1", "grp_1", "--data", `{"amountCents":200}`, "--lock-version", "0"}, `{"amountCents":200,"kind":"payment"}`},
 		{"an update keeps the lockVersion out of the body", []string{"group", "update", "grp_1", "--data", `{"visibility":"private_registered"}`, "--lock-version", "3"}, `{"visibility":"private_registered"}`},

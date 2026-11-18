@@ -303,7 +303,7 @@ set the schedule. `wariwari recurring example create` prints a template.
 ## Sharing and access
 
 ```bash
-wariwari invitation create GROUP_TOKEN --role editor --expires-at 2026-12-31T23:59:00+09:00   # prints the url
+wariwari invitation create GROUP_TOKEN --role editor --expires-in 7d   # prints the url
 wariwari invitation list GROUP_TOKEN
 wariwari invitation revoke INVITATION_TOKEN GROUP_TOKEN
 wariwari invitation accept INVITATION_TOKEN GROUP_TOKEN

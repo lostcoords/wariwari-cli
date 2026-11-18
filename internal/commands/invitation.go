@@ -1,6 +1,13 @@
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+)
 
 var invitationCmd = &cobra.Command{
 	Use:   "invitation",
@@ -8,7 +15,33 @@ var invitationCmd = &cobra.Command{
 }
 
 var invitationRole string
-var invitationExpiresAt string
+var invitationExpiresIn string
+
+// invitationNow is the clock --expires-in counts from; tests replace it.
+var invitationNow = time.Now
+
+// expiresAt turns an --expires-in window (90m, 24h, 7d) into the date-time the
+// server takes. Days are calendar days of 24 hours, as the server counts them.
+func expiresAt(window string) (string, error) {
+	var d time.Duration
+	if days, ok := strings.CutSuffix(window, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil {
+			return "", fmt.Errorf("--expires-in %q: use a number of days like 7d, or hours like 24h", window)
+		}
+		d = time.Duration(n) * 24 * time.Hour
+	} else {
+		parsed, err := time.ParseDuration(window)
+		if err != nil {
+			return "", fmt.Errorf("--expires-in %q: use a number of days like 7d, or hours like 24h", window)
+		}
+		d = parsed
+	}
+	if d <= 0 {
+		return "", fmt.Errorf("--expires-in %q: the window must be in the future", window)
+	}
+	return invitationNow().Add(d).Format(time.RFC3339), nil
+}
 
 var invitationListCmd = &cobra.Command{
 	Use:     "list [GROUP_TOKEN]",
@@ -34,9 +67,8 @@ var invitationCreateCmd = &cobra.Command{
 	Long: `Create an invitation to a view-only or private group and print its url.
 Admin-only. --role is the
 membershipRole whoever accepts gets (read_only, editor, admin; default editor).
---expires-at is when the link stops working, an ISO 8601 date-time in the
-future (2026-12-31T23:59:00+09:00); omit it for an invitation that never
-expires.
+--expires-in is how long the link works, in days or hours (7d, 24h, 30d);
+omit it for an invitation that never expires.
 
 For a public group, share the snapshot's shareUrl instead.`,
 	Args: cobra.MaximumNArgs(1),
@@ -49,8 +81,12 @@ For a public group, share the snapshot's shareUrl instead.`,
 		if invitationRole != "" {
 			body["membershipRole"] = invitationRole
 		}
-		if invitationExpiresAt != "" {
-			body["expiresAt"] = invitationExpiresAt
+		if invitationExpiresIn != "" {
+			at, err := expiresAt(invitationExpiresIn)
+			if err != nil {
+				return err
+			}
+			body["expiresAt"] = at
 		}
 		data, err := api.Post(cmd.Context(), "/groups/"+group+"/invitations", write(body))
 		if err != nil {
@@ -104,5 +140,5 @@ func init() {
 	invitationCmd.AddCommand(invitationListCmd, invitationCreateCmd, invitationRevokeCmd, invitationAcceptCmd)
 	addIdempotencyFlag(invitationCreateCmd, invitationRevokeCmd, invitationAcceptCmd)
 	invitationCreateCmd.Flags().StringVar(&invitationRole, "role", "", "Role for whoever accepts: read_only, editor, admin")
-	invitationCreateCmd.Flags().StringVar(&invitationExpiresAt, "expires-at", "", "When the link stops working, ISO 8601 with an offset")
+	invitationCreateCmd.Flags().StringVar(&invitationExpiresIn, "expires-in", "", "How long the link works: 7d, 24h, 30d")
 }

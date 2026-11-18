@@ -342,12 +342,12 @@ again to see what is left to settle.
 
 - Public group: give people the snapshot's `shareUrl`.
 - View-only or private group: `wariwari invitation create GROUP_TOKEN --role
-  editor --expires-at 2026-12-31T23:59:00+09:00 --json` returns the
+  editor --expires-in 7d --json` returns the
   invitation's `url` and `token`;
   `invitation list GROUP_TOKEN` shows the ones still usable; `invitation revoke
   INVITATION_TOKEN GROUP_TOKEN` disables one. `--role` is `read_only`, `editor`,
-  or `admin`; `--expires-at` is an ISO 8601 date-time in the future, and
-  omitting it makes a link that never expires. Admin-only.
+  or `admin`; `--expires-in` is how long the link works (`24h`, `7d`, `30d`),
+  and omitting it makes a link that never expires. Admin-only.
 - Accepting an invitation: `wariwari invitation accept INVITATION_TOKEN
   GROUP_TOKEN`. Joining a public group by its link: `wariwari group join
   GROUP_TOKEN`. Both return the participant you are now linked to. Leaving:
