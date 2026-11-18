@@ -95,9 +95,6 @@ tags:
   - name: attachments
     x-displayName: Photos & Files
     description: Photos and files shared in a group. Uploading needs a Pro group; reading and deleting never do.
-  - name: reminders
-    x-displayName: Reminders
-    description: Reminding members who owe money. Pro groups only.
   - name: recurring_expenses
     x-displayName: Recurring Expenses
     description: Expenses posted on a schedule. Pro groups only.
@@ -1820,174 +1817,6 @@ paths:
           $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
-  /v1/groups/{group_token}/reminder_schedule:
-    parameters:
-      - $ref: '#/components/parameters/GroupTokenAsParent'
-    get:
-      tags:
-        - reminders
-      operationId: showReminderSchedule
-      summary: Show a group's balance reminders
-      description: Any member can read when reminders go out. 404 `NOT_FOUND` while reminders are off.
-      responses:
-        '200':
-          description: The schedule
-          headers:
-            Read-Model-Version:
-              $ref: '#/components/headers/ReadModelVersion'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReminderSchedule'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-    put:
-      tags:
-        - reminders
-      operationId: setReminderSchedule
-      summary: Turn on or change a group's balance reminders
-      description: |
-        Sets when wariwari reminds members who owe money. Reminders are off
-        until a group has a schedule. Needs Pro on the signed-in account; otherwise 403 `PRO_REQUIRED`.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/RecordedAt'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReminderScheduleUpdate'
-      responses:
-        '200':
-          description: Updated
-          headers:
-            Idempotency-Replay:
-              $ref: '#/components/headers/IdempotencyReplay'
-            Read-Model-Version:
-              $ref: '#/components/headers/ReadModelVersion'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReminderSchedule'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-    delete:
-      tags:
-        - reminders
-      operationId: deleteReminderSchedule
-      summary: Turn off a group's balance reminders
-      description: Removes the group's reminder schedule. Removing one that is already off succeeds.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/RecordedAt'
-      responses:
-        '204':
-          description: Deleted
-          headers:
-            Idempotency-Replay:
-              $ref: '#/components/headers/IdempotencyReplay'
-            Read-Model-Version:
-              $ref: '#/components/headers/ReadModelVersion'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-  /v1/groups/{group_token}/reminders:
-    parameters:
-      - $ref: '#/components/parameters/GroupTokenAsParent'
-    post:
-      tags:
-        - reminders
-      operationId: createReminder
-      summary: Remind a member of what they owe
-      description: |
-        Reminds members of what they owe, by push when they have a registered
-        device and by email otherwise. A group admin can remind anyone who owes;
-        other members only the people who owe them. Each member is reminded at
-        most once a day.
-
-        With `participantToken`, reminds that one member: 403
-        `INSUFFICIENT_PERMISSIONS` when the caller may not remind them, 400
-        `VALIDATION_FAILED` when they owe nothing, have no account or turned
-        reminders off, and 409 `ALREADY_REMINDED` when already reminded today. Without it, reminds everyone the caller may remind
-        and lists the rest under `skipped`. Needs Pro on the signed-in account; otherwise 403
-        `PRO_REQUIRED`.
-      parameters:
-        - $ref: '#/components/parameters/RecordedAt'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BalanceReminderCreate'
-      responses:
-        '201':
-          description: Sent
-          headers:
-            Idempotency-Replay:
-              $ref: '#/components/headers/IdempotencyReplay'
-            Read-Model-Version:
-              $ref: '#/components/headers/ReadModelVersion'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BalanceReminderResult'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
   /v1/groups/{group_token}/recurring_expenses:
     parameters:
       - $ref: '#/components/parameters/GroupTokenAsParent'
@@ -2996,7 +2825,7 @@ components:
         | 403 | `ACCESS_DENIED`, `INSUFFICIENT_PERMISSIONS`, `PRO_REQUIRED` |
         | 404 | `NOT_FOUND` |
         | 405 | `METHOD_NOT_ALLOWED` |
-        | 409 | `CONFLICT`, `IDEMPOTENCY_KEY_IN_USE`, `IDEMPOTENCY_RECEIPT_EXPIRED`, `DUPLICATE_TOKEN`, `IDENTITY_LINKED_ELSEWHERE`, `ONBOARDING_REQUIRED`, `ALREADY_REMINDED` |
+        | 409 | `CONFLICT`, `IDEMPOTENCY_KEY_IN_USE`, `IDEMPOTENCY_RECEIPT_EXPIRED`, `DUPLICATE_TOKEN`, `IDENTITY_LINKED_ELSEWHERE`, `ONBOARDING_REQUIRED` |
         | 413 | `PAYLOAD_TOO_LARGE`, `STORAGE_LIMIT` |
         | 415 | `UNSUPPORTED_MEDIA_TYPE` |
         | 429 | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
@@ -3025,7 +2854,6 @@ components:
         - DUPLICATE_TOKEN
         - IDENTITY_LINKED_ELSEWHERE
         - ONBOARDING_REQUIRED
-        - ALREADY_REMINDED
         - PAYLOAD_TOO_LARGE
         - STORAGE_LIMIT
         - UNSUPPORTED_MEDIA_TYPE
@@ -3124,7 +2952,6 @@ components:
         - invitationAccepted
         - accessRequested
         - accessApproved
-        - balanceReminder
       description: |
         Per-event notification toggles for the signed-in user. Every event is
         on unless explicitly turned off.
@@ -3139,9 +2966,6 @@ components:
           type: boolean
         accessApproved:
           type: boolean
-        balanceReminder:
-          type: boolean
-          description: Reminders of what the user owes, by push or, without a registered device, by email.
     Account:
       type: object
       required:
@@ -3203,7 +3027,7 @@ components:
           description: |
             True while the account holds Pro: a purchase that is not refunded and
             not expired. Pro is personal: it lets this account upload photos and
-            files, scan receipts, set reminders and recurring expenses in any group,
+            files, scan receipts and set up recurring expenses in any group,
             and write through the API and AI integrations. Everyone in a group sees
             what a Pro member adds.
         onboarded:
@@ -5173,145 +4997,6 @@ components:
             $ref: '#/components/schemas/StatsExpense'
         deltas:
           $ref: '#/components/schemas/StatsDeltas'
-    ReminderCadence:
-      type: string
-      enum:
-        - weekly
-        - monthly
-    ReminderSchedule:
-      type: object
-      additionalProperties: false
-      required:
-        - cadence
-        - weekday
-        - day
-        - nextRunOn
-        - paused
-        - ownerName
-        - updatedAt
-      description: |
-        When a group's members who owe money get reminded. Reminders run on the Pro
-        of the member who last set them: while that member doesn't have Pro or has
-        left the group they are `paused`.
-      properties:
-        cadence:
-          $ref: '#/components/schemas/ReminderCadence'
-        weekday:
-          type:
-            - integer
-            - 'null'
-          minimum: 0
-          maximum: 6
-          description: Day of the week for `weekly`, 0 = Sunday. `null` for `monthly`.
-        day:
-          type:
-            - integer
-            - 'null'
-          minimum: 1
-          maximum: 28
-          description: Day of the month for `monthly`. `null` for `weekly`.
-        nextRunOn:
-          type: string
-          format: date
-          description: The Tokyo date of the next reminder run, which goes out at 9:00 Tokyo time.
-        paused:
-          type: boolean
-          description: True while the member who set the reminders doesn't have Pro or has left the group.
-        ownerName:
-          type:
-            - string
-            - 'null'
-          description: The name of the member who set the reminders, or `null` when they have left the group.
-        updatedAt:
-          type: string
-          format: date-time
-    ReminderScheduleUpdate:
-      type: object
-      additionalProperties: false
-      required:
-        - cadence
-      properties:
-        cadence:
-          $ref: '#/components/schemas/ReminderCadence'
-        weekday:
-          type: integer
-          minimum: 0
-          maximum: 6
-          description: Required for `weekly`; 0 = Sunday.
-        day:
-          type: integer
-          minimum: 1
-          maximum: 28
-          description: Required for `monthly`.
-    BalanceReminderCreate:
-      type: object
-      additionalProperties: false
-      properties:
-        participantToken:
-          allOf:
-            - $ref: '#/components/schemas/Token'
-          description: The member to remind. Omit it to remind everyone who owes and whom the caller may remind.
-    BalanceReminder:
-      type: object
-      additionalProperties: false
-      required:
-        - participantToken
-        - channel
-        - amountCents
-        - currency
-        - sentAt
-      description: A reminder sent to one member about the balance they owe.
-      properties:
-        participantToken:
-          $ref: '#/components/schemas/Token'
-        channel:
-          type: string
-          enum:
-            - email
-            - push
-        amountCents:
-          type: integer
-          description: What the member owed when reminded, in minor units of `currency`.
-        currency:
-          $ref: '#/components/schemas/Currency'
-        sentAt:
-          type: string
-          format: date-time
-    SkippedReminder:
-      type: object
-      additionalProperties: false
-      required:
-        - participantToken
-        - reason
-      properties:
-        participantToken:
-          $ref: '#/components/schemas/Token'
-        reason:
-          type: string
-          enum:
-            - unlinked
-            - opted_out
-            - recently_reminded
-          description: |
-            `unlinked`: the member has no account to reach. `opted_out`: they turned
-            balance reminders off or muted the group. `recently_reminded`: already
-            reminded within the last day (or 3 days, by the schedule).
-    BalanceReminderResult:
-      type: object
-      additionalProperties: false
-      required:
-        - reminded
-        - skipped
-      description: Who was reminded, and who owes but was not, with the reason.
-      properties:
-        reminded:
-          type: array
-          items:
-            $ref: '#/components/schemas/BalanceReminder'
-        skipped:
-          type: array
-          items:
-            $ref: '#/components/schemas/SkippedReminder'
     RecurringSplit:
       type: object
       additionalProperties: false
@@ -5762,8 +5447,6 @@ components:
           type: boolean
         accessApproved:
           type: boolean
-        balanceReminder:
-          type: boolean
     AccountUpdate:
       type: object
       additionalProperties: false
@@ -6077,7 +5760,6 @@ x-tagGroups:
       - categories
       - transactions
       - attachments
-      - reminders
       - recurring_expenses
       - invitations
       - access_requests

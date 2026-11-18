@@ -22,7 +22,6 @@ func TestEmbeddedSkillDocumentsCurrentContract(t *testing.T) {
 		"Transaction reads always include `timeOfDay`, but it can be `null`",
 		"Free API keys can read with a monthly limit; writes need wariwari Pro",
 		"`PRO_REQUIRED`",
-		"`ALREADY_REMINDED`",
 		"`INTERNAL_SERVER_EXCEPTION`",
 		"`QUOTA_EXCEEDED`",
 		"as `--lock-version` for updates, deletes and merges",

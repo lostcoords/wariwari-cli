@@ -221,7 +221,7 @@ func jsonShape(v any) (any, error) {
 
 // collectionKeys are the camelCase array fields the API nests rows under, in
 // the order --count and --ids-only should prefer them.
-var collectionKeys = []string{"groups", "transactions", "participants", "categories", "activity", "suggestedPayments", "accessRequests", "recurringExpenses", "reminded", "attachments"}
+var collectionKeys = []string{"groups", "transactions", "participants", "categories", "activity", "suggestedPayments", "accessRequests", "recurringExpenses", "attachments"}
 
 func countData(v any) int {
 	switch data := v.(type) {

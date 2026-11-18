@@ -277,19 +277,13 @@ the first outcome for 90 days. Reusing the key with a different body returns
 
 ## Pro workflows
 
-Reminders, recurring expenses, receipt photo uploads and shared files need Pro
-on the signed-in account (the account's `pro`). Everyone in the group sees what
-a Pro member adds; reminders and recurring expenses pause (`paused`,
-`ownerName`) while the member who set them up has no Pro or has left. Without it these answer `403 PRO_REQUIRED` with an `upgradeUrl`;
+Recurring expenses, receipt photo uploads and shared files need Pro on the
+signed-in account (the account's `pro`). Everyone in the group sees what a Pro
+member adds; recurring expenses pause (`paused`, `ownerName`) while the member
+who set them up has no Pro or has left. Without it these answer `403 PRO_REQUIRED` with an `upgradeUrl`;
 pass that URL to the user rather than retrying.
 
 ```bash
-wariwari remind GROUP_TOKEN --json                                # everyone who owes money
-wariwari remind GROUP_TOKEN --participant PARTICIPANT_TOKEN --json
-wariwari reminder schedule show GROUP_TOKEN --json
-wariwari reminder schedule weekly GROUP_TOKEN --weekday mon --json
-wariwari reminder schedule monthly GROUP_TOKEN --day 25 --json
-wariwari reminder schedule off GROUP_TOKEN --json
 wariwari recurring list GROUP_TOKEN --json
 wariwari recurring create GROUP_TOKEN --data-file rent.json --every monthly --starts 2026-12-01 --json
 wariwari recurring update RECURRING_TOKEN GROUP_TOKEN --interval 2 --json
@@ -302,12 +296,7 @@ wariwari file upload photo.jpg GROUP_TOKEN --json
 wariwari file delete FILE_ID GROUP_TOKEN --json
 ```
 
-`remind` without `--participant` reminds everyone who owes and whom you may
-remind; the rest come back under `skipped` with a `reason` (`unlinked`,
-`opted_out`, `recently_reminded`). Each member is reminded at most once a day:
-`--participant` for someone already reminded today answers
-`409 ALREADY_REMINDED`. A
-recurring expense's body is the expense fields of `transaction create`
+A recurring expense's body is the expense fields of `transaction create`
 (`description`, `amountCents`, `currency`, `paidByParticipantToken`,
 `splitType`, `splits`, optional `categoryToken`) without `kind` or `date`;
 `--every weekly|monthly|yearly`, `--interval N` and `--starts YYYY-MM-DD` set
@@ -424,7 +413,6 @@ Every failure is one Problem body: `code`, `title`, `detail`, `status` and
 | `CONFLICT`                                        | 409    | Stale `lockVersion` — reconcile against `current`.  |
 | `IDEMPOTENCY_KEY_IN_USE`                          | 409    | Same key, different body. Use a fresh key.          |
 | `IDEMPOTENCY_RECEIPT_EXPIRED`                     | 409    | Retry older than 90 days. Read the group first.     |
-| `ALREADY_REMINDED`                                | 409    | That member was reminded today. Do not retry.       |
 | `DUPLICATE_TOKEN`                                 | 409    | Client token already used. Read the snapshot.       |
 | `RATE_LIMIT_EXCEEDED`                             | 429    | Back off for `retryAfter` seconds.                  |
 | `QUOTA_EXCEEDED`                                  | 429    | Free key quota used. Show `detail` and `upgradeUrl`.|

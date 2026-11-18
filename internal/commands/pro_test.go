@@ -64,23 +64,6 @@ func TestProErrorsShowTheServerDetailAndUpgradeLink(t *testing.T) {
 	}
 }
 
-func TestRemindPrintsWhoWasRemindedAndWhoWasSkipped(t *testing.T) {
-	handler := func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"reminded":[{"participantToken":"part_a","channel":"push","amountCents":4000,"currency":"JPY","sentAt":"2026-11-16T10:00:00Z"}],
-			"skipped":[{"participantToken":"part_b","reason":"opted_out"},{"participantToken":"part_c","reason":"recently_reminded"}]}`))
-	}
-	stdout, _, _, err := runRootCommand(t, proTestConfig(), handler, "remind", "grp_1", "--json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`"summary": "1 reminded, 2 skipped"`, `"reason": "opted_out"`, `"reason": "recently_reminded"`} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("output missing %s:\n%s", want, stdout)
-		}
-	}
-}
-
 // Both "none here" and "no such group or expense" are 404; only the first is
 // reported as an empty result.
 func TestA404IsAbsenceOnlyWhenTheParentExists(t *testing.T) {
@@ -90,7 +73,7 @@ func TestA404IsAbsenceOnlyWhenTheParentExists(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":404,"code":"NOT_FOUND"}`))
 	}
 	parentExists := func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/reminder_schedule") || strings.HasSuffix(r.URL.Path, "/receipt_photo") {
+		if strings.HasSuffix(r.URL.Path, "/receipt_photo") {
 			notFound(w)
 			return
 		}
@@ -102,7 +85,6 @@ func TestA404IsAbsenceOnlyWhenTheParentExists(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"reminder", "schedule", "show", "grp_1"}, `"reminders": "off"`},
 		{[]string{"transaction", "receipt", "show", "txn_1", "grp_1"}, `"receiptPhoto": null`},
 	}
 	for _, tt := range tests {
@@ -112,20 +94,6 @@ func TestA404IsAbsenceOnlyWhenTheParentExists(t *testing.T) {
 		}
 		if _, _, _, err := runRootCommand(t, proTestConfig(), nothingExists, tt.args...); err == nil || !strings.Contains(err.Error(), "NOT_FOUND") {
 			t.Fatalf("%v: err = %v, want NOT_FOUND for a missing parent", tt.args, err)
-		}
-	}
-}
-
-func TestReminderScheduleChecksItsDayBeforeCalling(t *testing.T) {
-	for _, args := range [][]string{
-		{"reminder", "schedule", "weekly", "grp_1"},
-		{"reminder", "schedule", "weekly", "grp_1", "--weekday", "7"},
-		{"reminder", "schedule", "monthly", "grp_1", "--day", "31"},
-		{"reminder", "schedule", "daily", "grp_1"},
-	} {
-		_, _, requests, err := runRootCommand(t, proTestConfig(), contractHandler, args...)
-		if err == nil || len(requests) != 0 {
-			t.Fatalf("%v: err = %v, %d requests; want a usage error before any request", args, err, len(requests))
 		}
 	}
 }

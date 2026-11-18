@@ -275,15 +275,11 @@ categories.
 
 ## Pro features
 
-Reminders, recurring expenses, receipt photo uploads and shared files need Pro on your own account
-(`pro` in `wariwari account show`). Everyone in the group sees what you add. Your reminders and
-recurring expenses pause while you have no Pro or have left the group.
+Recurring expenses, receipt photo uploads and shared files need Pro on your own account
+(`pro` in `wariwari account show`). Everyone in the group sees what you add. Your recurring
+expenses pause while you have no Pro or have left the group.
 
 ```bash
-wariwari remind GROUP_TOKEN                                   # everyone who owes money
-wariwari remind GROUP_TOKEN --participant PARTICIPANT_TOKEN
-wariwari reminder schedule weekly GROUP_TOKEN --weekday mon   # or: monthly --day 25, off
-wariwari reminder schedule show GROUP_TOKEN
 wariwari recurring list GROUP_TOKEN
 wariwari recurring create GROUP_TOKEN --data-file rent.json --every monthly --starts 2026-12-01
 wariwari recurring update RECURRING_TOKEN GROUP_TOKEN --interval 2

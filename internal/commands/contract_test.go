@@ -106,14 +106,6 @@ var contracts = []contract{
 	{name: "transaction receipt show", args: []string{"transaction", "receipt", "show", "txn_1", "grp_1"}, operation: "showReceiptPhoto", method: "GET", path: "/v1/groups/grp_1/transactions/txn_1/receipt_photo"},
 	{name: "expense is transaction", args: []string{"expense", "receipt", "delete", "txn_1", "grp_1"}, operation: "deleteReceiptPhoto", method: "DELETE", path: "/v1/groups/grp_1/transactions/txn_1/receipt_photo"},
 
-	{name: "reminder send", args: []string{"reminder", "send", "grp_1", "--participant", "part_1"}, operation: "createReminder", method: "POST", path: "/v1/groups/grp_1/reminders"},
-	{name: "remind is reminder send", args: []string{"remind", "grp_1", "--participant", "part_1"}, operation: "createReminder", method: "POST", path: "/v1/groups/grp_1/reminders"},
-	{name: "reminder schedule weekly", args: []string{"reminder", "schedule", "weekly", "grp_1", "--weekday", "mon"}, operation: "setReminderSchedule", method: "PUT", path: "/v1/groups/grp_1/reminder_schedule"},
-	{name: "reminder schedule monthly", args: []string{"reminders", "schedule", "monthly", "grp_1", "--day", "25"}, operation: "setReminderSchedule", method: "PUT", path: "/v1/groups/grp_1/reminder_schedule"},
-	{name: "reminder schedule show", args: []string{"reminder", "schedule", "show", "grp_1"}, operation: "showReminderSchedule", method: "GET", path: "/v1/groups/grp_1/reminder_schedule"},
-	{name: "reminder send to everyone who owes", args: []string{"remind", "grp_1"}, operation: "createReminder", method: "POST", path: "/v1/groups/grp_1/reminders"},
-	{name: "reminder schedule off", args: []string{"reminder", "schedule", "off", "grp_1"}, operation: "deleteReminderSchedule", method: "DELETE", path: "/v1/groups/grp_1/reminder_schedule"},
-
 	{name: "recurring list", args: []string{"recurring", "list", "grp_1"}, operation: "listRecurringExpenses", method: "GET", path: "/v1/groups/grp_1/recurring_expenses"},
 	{name: "recurring show", args: []string{"recurring", "show", "rec_1", "grp_1"}, operation: "showRecurringExpense", method: "GET", path: "/v1/groups/grp_1/recurring_expenses/rec_1"},
 	{name: "recurring create", args: []string{"recurring", "add", "grp_1", "--data", `{"description":"Rent"}`, "--every", "monthly", "--starts", "2026-12-01"}, operation: "createRecurringExpense", method: "POST", path: "/v1/groups/grp_1/recurring_expenses"},
@@ -196,10 +188,6 @@ func TestWriteBodiesMatchTheSpec(t *testing.T) {
 		{"leaving sends no body", []string{"group", "leave", "grp_1"}, ``},
 		{"invitation create defaults to an empty body", []string{"invitation", "create", "grp_1"}, `{}`},
 		{"feedback joins the message", []string{"feedback", "Love", "it"}, `{"body":"Love it"}`},
-		{"reminder send names the participant", []string{"remind", "grp_1", "--participant", "part_1"}, `{"participantToken":"part_1"}`},
-		{"reminding everyone sends no body", []string{"remind", "grp_1"}, ``},
-		{"weekly reminders take a weekday name", []string{"reminder", "schedule", "weekly", "grp_1", "--weekday", "Monday"}, `{"cadence":"weekly","weekday":1}`},
-		{"monthly reminders take a day", []string{"reminder", "schedule", "monthly", "grp_1", "--day", "25"}, `{"cadence":"monthly","day":25}`},
 		{"recurring flags override the body", []string{"recurring", "create", "grp_1", "--data", `{"description":"Rent","cadence":"weekly"}`, "--every", "monthly", "--interval", "3", "--starts", "2026-12-01"}, `{"cadence":"monthly","description":"Rent","interval":3,"startsOn":"2026-12-01"}`},
 		{"recurring update sends only what changes", []string{"recurring", "update", "rec_1", "grp_1", "--starts", "2027-01-01"}, `{"startsOn":"2027-01-01"}`},
 	}
@@ -235,7 +223,6 @@ func TestNoContentWritesReportTheirOwnResult(t *testing.T) {
 		{[]string{"invitation", "revoke", "inv_1", "grp_1"}, `"revoked": true`},
 		{[]string{"access-request", "decline", "7", "grp_1"}, `"declined": true`},
 		{[]string{"recurring", "delete", "rec_1", "grp_1"}, `"deleted": true`},
-		{[]string{"reminder", "schedule", "off", "grp_1"}, `"reminders": "off"`},
 		{[]string{"file", "delete", "12", "grp_1"}, `"deleted": true`},
 	}
 	for _, tt := range tests {

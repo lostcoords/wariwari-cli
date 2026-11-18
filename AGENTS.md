@@ -94,9 +94,6 @@ Two carve-outs:
 | `transaction receipt show`   | `GET /v1/groups/:g/transactions/:t/receipt_photo`             |
 | `transaction receipt upload` | `PUT /v1/groups/:g/transactions/:t/receipt_photo` (multipart) |
 | `transaction receipt delete` | `DELETE /v1/groups/:g/transactions/:t/receipt_photo`          |
-| `reminder send` / `remind`   | `POST /v1/groups/:g/reminders` (no body: everyone who owes)   |
-| `reminder schedule show`     | `GET /v1/groups/:g/reminder_schedule` (404 = off)             |
-| `reminder schedule`          | `PUT` / `DELETE` (`off`) `/v1/groups/:g/reminder_schedule`    |
 | `file list` / `upload`       | `GET` / `POST /v1/groups/:g/attachments` (upload multipart)   |
 | `file show` / `delete`       | `GET` / `DELETE /v1/groups/:g/attachments/:id`                |
 | `recurring list` / `create`  | `GET` / `POST /v1/groups/:g/recurring_expenses`               |
@@ -150,10 +147,10 @@ answer it with `403 ACCESS_DENIED`, so the CLI does not wrap them:
 bundle the CLI vendors.
 
 Partial updates are **PATCH**. **PUT** replaces a whole singleton: notification
-settings, the reminder schedule, and the multipart receipt photo. Uploads go
+settings and the multipart receipt photo. Uploads go
 through `client.Client.Upload`.
-`receipt show` and `schedule show` read a 404 as "none" only after the parent
-expense or group reads (`absentOn404`).
+`receipt show` reads a 404 as "none" only after the parent expense reads
+(`absentOn404`).
 
 ### Semantics worth remembering
 
@@ -182,8 +179,7 @@ expense or group reads (`absentOn404`).
 - **Every failure is one Problem body**: `code`, `title`, `detail`, `status`,
   `instance`, plus `errors` (validation, keyed by wire field path or header
   name) and `current` (409 CONFLICT). There is no `type`. Switch on `code`;
-  `VALIDATION_FAILED` is a `400`, not a `422`. A second reminder to one member
-  in a day is `409 ALREADY_REMINDED`. A `429` is
+  `VALIDATION_FAILED` is a `400`, not a `422`. A `429` is
   `RATE_LIMIT_EXCEEDED` or `QUOTA_EXCEEDED`, with `Retry-After`.
   `403 PRO_REQUIRED` and `429 QUOTA_EXCEEDED` carry `upgradeUrl`, and their
   `detail` states the price and limit: print it as sent, never a copy.
