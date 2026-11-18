@@ -120,7 +120,6 @@ wariwari group show GROUP_TOKEN          # the full snapshot
 wariwari group activity GROUP_TOKEN
 wariwari group stats GROUP_TOKEN --date-range this_month
 wariwari group fx-rate GROUP_TOKEN --from USD --date 2026-05-01
-wariwari group settings GROUP_TOKEN
 wariwari group notifications show GROUP_TOKEN
 wariwari balance GROUP_TOKEN
 wariwari participant list GROUP_TOKEN
@@ -131,10 +130,10 @@ wariwari transaction show TRANSACTION_TOKEN GROUP_TOKEN
 wariwari transaction activity TRANSACTION_TOKEN GROUP_TOKEN
 ```
 
-`group show` returns the whole group render state — metadata, `shareUrl` (the
-invite link), `participants`,
-`groupCategories`, `transactions`, `netByCurrency`, `suggestedPayments`, and
-spending totals. `balance`, `participant list`, and `category list` read that
+`group show` returns the whole group render state — metadata, `visibility`,
+`shareUrl` (the invite link), `participants`, `categories`, `transactions`,
+`netByCurrency`, `suggestedPayments`, and spending totals. It is the one read
+of a whole group. `balance`, `participant list`, and `category list` read that
 same snapshot; the API has no list endpoints for participants or categories.
 
 `participant balance` shows how one participant's balance adds up, transaction
@@ -142,8 +141,9 @@ by transaction, in the group currency.
 
 In `netByCurrency`, positive means the participant is owed money and negative
 means they owe. Transaction reads always contain `timeOfDay`, but it can be
-`null` for an import whose source did not include a time. `paidByToken` can also
-be `null` for historical data whose payer was removed.
+`null` for an import whose source did not include a time.
+`paidByParticipantToken` can also be `null` for historical data whose payer was
+removed.
 
 ### Filtering transactions
 
@@ -188,34 +188,35 @@ wariwari group list --take 100 --cursor eyJraW5kIjoia2V5c2V0In0 --json
 ## Writing
 
 Write commands accept a JSON body via `--data` or `--data-file`. All fields are
-camelCase, and writes to a group's resources return the refreshed group
-snapshot. `wariwari <resource> example <action>` prints a template body.
+camelCase. A create or update returns the record it wrote and a delete returns
+nothing; only `group show` returns the snapshot. `wariwari <resource> example
+<action>` prints a template body.
 
 ```bash
 wariwari group create --idempotency-key "$(uuidgen)" \
   --data '{"name":"Trip","icon":"🧳","currency":"JPY","participants":[{"name":"Ada","color":"#1F3A5F"}]}'
-wariwari group update GROUP_TOKEN --data '{"name":"Trip 2026","lockVersion":1}'
+wariwari group update GROUP_TOKEN --lock-version 1 --data '{"name":"Trip 2026"}'
+wariwari group update GROUP_TOKEN --lock-version 2 --data '{"visibility":"private_registered"}'
 wariwari participant create GROUP_TOKEN --data '{"name":"Ada","color":"#1F3A5F"}'
-wariwari participant update PARTICIPANT_TOKEN GROUP_TOKEN --data '{"name":"Ada","lockVersion":0}'
+wariwari participant update PARTICIPANT_TOKEN GROUP_TOKEN --lock-version 0 --data '{"name":"Ada"}'
+wariwari participant update PARTICIPANT_TOKEN GROUP_TOKEN --lock-version 1 --data '{"membershipRole":"admin"}'
 wariwari participant delete PARTICIPANT_TOKEN GROUP_TOKEN --lock-version 0
 wariwari participant merge DUPLICATE_TOKEN GROUP_TOKEN --into KEEP_TOKEN
-wariwari participant move PARTICIPANT_TOKEN GROUP_TOKEN --position 1     # or --up / --down
+wariwari participant move PARTICIPANT_TOKEN GROUP_TOKEN --position 1
 wariwari participant claim PARTICIPANT_TOKEN GROUP_TOKEN                 # "this one is me"
-wariwari participant unlink PARTICIPANT_TOKEN GROUP_TOKEN
 wariwari category create GROUP_TOKEN --data '{"name":"Food","emoji":"🍜","position":1}'
-wariwari category update CATEGORY_TOKEN GROUP_TOKEN --data '{"name":"Food","emoji":"🍜","lockVersion":0}'
+wariwari category update CATEGORY_TOKEN GROUP_TOKEN --lock-version 0 --data '{"name":"Food","emoji":"🍜"}'
 wariwari category delete CATEGORY_TOKEN GROUP_TOKEN --lock-version 0
 wariwari transaction create GROUP_TOKEN --data-file transaction-create.json
-wariwari transaction update TRANSACTION_TOKEN GROUP_TOKEN --data-file transaction-update.json
+wariwari transaction update TRANSACTION_TOKEN GROUP_TOKEN --lock-version 2 --data-file transaction-update.json
 wariwari transaction delete TRANSACTION_TOKEN GROUP_TOKEN --lock-version 2
-wariwari transaction bulk-edit GROUP_TOKEN --data '{"transactionTokens":["T1","T2"],"groupCategoryToken":"CAT"}'
-wariwari transaction bulk-delete GROUP_TOKEN --data '{"transactionTokens":["T1","T2"]}'
-wariwari payment create GROUP_TOKEN --data '{"fromToken":"FROM","toToken":"TO","amountCents":4000}'
-wariwari payment update PAYMENT_TOKEN GROUP_TOKEN --data '{"fromToken":"FROM","toToken":"TO","amountCents":4500,"date":"2026-05-24","lockVersion":0}'
-wariwari group settings update GROUP_TOKEN --data '{"visibility":"private_registered","lockVersion":3}'
+wariwari transaction bulk-edit GROUP_TOKEN --data '{"transactions":[{"token":"T1"},{"token":"T2"}],"categoryToken":"CAT"}'
+wariwari transaction bulk-delete GROUP_TOKEN --data '{"transactions":[{"token":"T1","expectedRevision":2},{"token":"T2"}]}'
+wariwari payment create GROUP_TOKEN --data '{"fromParticipantToken":"FROM","toParticipantToken":"TO","amountCents":4000}'
+wariwari payment update PAYMENT_TOKEN GROUP_TOKEN --lock-version 0 --data '{"amountCents":4500}'
 wariwari group archive GROUP_TOKEN
 wariwari group unarchive GROUP_TOKEN
-wariwari group dismiss GROUP_TOKEN                       # leave: hide it and unlink yourself
+wariwari group leave GROUP_TOKEN                         # stop being a member; your participant stays as a guest
 wariwari group duplicate GROUP_TOKEN --include-members   # new group with the same categories
 wariwari group join GROUP_TOKEN                          # a public group, by its link
 wariwari group notifications mute GROUP_TOKEN
@@ -223,27 +224,31 @@ wariwari group delete GROUP_TOKEN --lock-version 3
 wariwari account update --data '{"locale":"ja"}'
 ```
 
-Updates require `lockVersion` from the record you just read. Deletes, merges
-and moves take it as `--lock-version`; without the flag the CLI reads the
-current value first and acts on whatever is there. Bulk edits take a
-`lockVersions` map and fill in tokens you leave out the same way. A stale value
-returns `409 CONFLICT`, usually with the fresh record under `current`. Re-apply
-your change on top of it and retry. Retrying a delete that already went through
-succeeds again.
+Updates, deletes and merges need the `lockVersion` of the record you just
+read, as `--lock-version`; it never goes in the body. Without the flag the CLI
+reads the current value first and acts on whatever is there. Bulk edits and
+deletes take it per transaction as `expectedRevision` and fill in the ones you
+leave out the same way. A stale value returns `409 CONFLICT`, usually with the
+fresh record under `current`, keyed by its kind (`current.transaction`).
+Re-apply your change on top of it and retry. Retrying a delete that already
+went through succeeds again.
 
-`payment update` replaces the payment: resend `date` and the other fields you
-want to keep, or the date resets to today. `group settings update` changes
-currency (existing transactions are rebased in the background), visibility,
-existing categories by token (`categories: [{token, name, emoji, position}]`),
-and roles of linked participants (`participants: [{token, membershipRole}]`).
+`group update` changes name, icon, currency (existing transactions are rebased
+in the background) and visibility (`public_editable`, `public_view_only`,
+`private_registered`). `participant update` renames or recolours a guest, or
+sets the `membershipRole` of a member linked to an account.
 
-A transaction needs `description`, `amountCents`, `currency`, `splitType`,
-`date`, `paidByToken`, and `splits`. `splitType` is one of `equal`,
-`percentage`, `shares`, `amount`. With `equal`, the splits may omit
-`amountCents` and the server divides the amount evenly. Optional:
-`groupCategoryToken` (send `null` on update to clear it), `timeOfDay`
-(`HH:MM`), and `balanceCurrency` (the transaction currency keeps it in its own
-balance bucket).
+A payment is a transaction of kind `payment`; the `payment` commands set `kind`
+for you, and `payment update` takes only the fields that change.
+
+An expense needs `kind`, `description`, `amountCents`, `currency`, `splitType`,
+`date`, `paidByParticipantToken`, and `splits`. `kind` is required on update
+too and cannot change. `splitType` is one of `equal`, `percentage`, `shares`,
+`amount`. With `equal`, the splits may omit `amountCents` and the server
+divides the amount evenly. Optional: `categoryToken`, one of the group's
+categories (send `null` on update to clear it), `timeOfDay` (`HH:MM`), and
+`balanceCurrency` (the transaction currency keeps it in its own balance
+bucket).
 
 ```json
 {
@@ -254,7 +259,7 @@ balance bucket).
   "currency": "JPY",
   "splitType": "equal",
   "date": "2026-05-23",
-  "paidByToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
+  "paidByParticipantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
   "splits": [
     { "participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj", "amountCents": 6000 },
     { "participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa", "amountCents": 6000 }
@@ -298,7 +303,7 @@ set the schedule. `wariwari recurring example create` prints a template.
 ## Sharing and access
 
 ```bash
-wariwari invitation create GROUP_TOKEN --role editor --expires-in 7d   # prints the url
+wariwari invitation create GROUP_TOKEN --role editor --expires-at 2026-12-31T23:59:00+09:00   # prints the url
 wariwari invitation list GROUP_TOKEN
 wariwari invitation revoke INVITATION_TOKEN GROUP_TOKEN
 wariwari invitation accept INVITATION_TOKEN GROUP_TOKEN
@@ -327,9 +332,10 @@ Use the app for those.
 
 ## Errors
 
-Failures are RFC 9457 Problem Details. The CLI prints `CODE: detail (HTTP nnn)`,
-lists any `errors` fields, and with `--json` emits the whole problem document —
-including `current` on a `409` and `retryAfter` on a `429`
+Every failure is one Problem body: `code`, `title`, `detail`, `status` and
+`instance`. The CLI prints `CODE: detail (HTTP nnn)`, lists any `errors` (keyed
+by field path or header name), and with `--json` emits the whole problem —
+including `current` on a `409 CONFLICT` and `retryAfter` on a `429`
 (`RATE_LIMIT_EXCEEDED` or `QUOTA_EXCEEDED`) — so a caller can switch on `code`.
 
 ## Agent Integration

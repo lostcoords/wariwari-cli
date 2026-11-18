@@ -9,10 +9,10 @@ import (
 	"github.com/lostcoords/wariwari-cli/internal/config"
 )
 
-func TestBulkEditSendsTheLockVersionsItRead(t *testing.T) {
+func TestBulkEditSendsTheRevisionsItRead(t *testing.T) {
 	cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
 	_, _, requests, err := runRootCommand(t, cfg, contractHandler,
-		"transaction", "bulk-edit", "grp_1", "--data", `{"transactionTokens":["txn_1","txn_2"],"lockVersions":{"txn_2":5},"date":"2026-05-01"}`, "--json")
+		"transaction", "bulk-edit", "grp_1", "--data", `{"transactions":[{"token":"txn_1"},{"token":"txn_2","expectedRevision":5}],"date":"2026-05-01"}`, "--json")
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -20,13 +20,16 @@ func TestBulkEditSendsTheLockVersionsItRead(t *testing.T) {
 		t.Fatalf("expected one read of txn_1 before the write, got %+v", requests)
 	}
 	var body struct {
-		LockVersions map[string]int `json:"lockVersions"`
+		Transactions []struct {
+			Token            string `json:"token"`
+			ExpectedRevision int    `json:"expectedRevision"`
+		} `json:"transactions"`
 	}
 	if err := json.Unmarshal([]byte(requests[1].Body), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.LockVersions["txn_1"] != 7 || body.LockVersions["txn_2"] != 5 {
-		t.Fatalf("lockVersions = %v, want txn_1 read as 7 and txn_2 kept at 5", body.LockVersions)
+	if len(body.Transactions) != 2 || body.Transactions[0].ExpectedRevision != 7 || body.Transactions[1].ExpectedRevision != 5 {
+		t.Fatalf("transactions = %+v, want txn_1 read as 7 and txn_2 kept at 5", body.Transactions)
 	}
 }
 
@@ -53,22 +56,17 @@ func TestDeleteOfAMissingRecordLetsTheServerDecide(t *testing.T) {
 			t.Fatalf("%v: %v", args, err)
 		}
 		last := requests[len(requests)-1]
-		if last.Method != http.MethodDelete || last.Header.Get("WariWari-Expected-Revision") != "0" {
-			t.Fatalf("%v: last request %s with revision %q, want DELETE at 0", args, last.Method, last.Header.Get("WariWari-Expected-Revision"))
+		if last.Method != http.MethodDelete || last.Header.Get("Expected-Revision") != "0" {
+			t.Fatalf("%v: last request %s with revision %q, want DELETE at 0", args, last.Method, last.Header.Get("Expected-Revision"))
 		}
 	}
 }
 
-func TestParticipantMoveNeedsOneDirection(t *testing.T) {
+func TestParticipantMoveNeedsAPosition(t *testing.T) {
 	cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
-	for _, args := range [][]string{
-		{"participant", "move", "part_1", "grp_1"},
-		{"participant", "move", "part_1", "grp_1", "--up", "--position", "2"},
-	} {
-		_, _, requests, err := runRootCommand(t, cfg, contractHandler, args...)
-		if err == nil || len(requests) != 0 {
-			t.Fatalf("%v: err = %v, %d requests; want a usage error before any request", args, err, len(requests))
-		}
+	_, _, requests, err := runRootCommand(t, cfg, contractHandler, "participant", "move", "part_1", "grp_1")
+	if err == nil || len(requests) != 0 {
+		t.Fatalf("err = %v, %d requests; want a usage error before any request", err, len(requests))
 	}
 }
 
@@ -76,7 +74,7 @@ func TestInvitationCreatePrintsTheLinkToShare(t *testing.T) {
 	handler := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"token":"inv_1","membershipRole":"editor","url":"https://wariwari.jp/invitations/inv_1","active":true}`))
+		_, _ = w.Write([]byte(`{"token":"inv_1","membershipRole":"editor","url":"https://wariwari.jp/invitations/inv_1","expiresAt":null,"createdAt":"2026-11-18T00:00:00Z"}`))
 	}
 	cfg := &config.Config{APIURL: "http://example.invalid", Token: "test-token"}
 	stdout, _, _, err := runRootCommand(t, cfg, handler, "invitation", "create", "grp_1", "--json")

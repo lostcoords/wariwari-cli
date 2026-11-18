@@ -8,7 +8,7 @@ var invitationCmd = &cobra.Command{
 }
 
 var invitationRole string
-var invitationExpiresIn string
+var invitationExpiresAt string
 
 var invitationListCmd = &cobra.Command{
 	Use:     "list [GROUP_TOKEN]",
@@ -34,7 +34,9 @@ var invitationCreateCmd = &cobra.Command{
 	Long: `Create an invitation to a view-only or private group and print its url.
 Admin-only. --role is the
 membershipRole whoever accepts gets (read_only, editor, admin; default editor).
---expires-in is 24h, 7d or 30d; omit it for an invitation that never expires.
+--expires-at is when the link stops working, an ISO 8601 date-time in the
+future (2026-12-31T23:59:00+09:00); omit it for an invitation that never
+expires.
 
 For a public group, share the snapshot's shareUrl instead.`,
 	Args: cobra.MaximumNArgs(1),
@@ -47,8 +49,8 @@ For a public group, share the snapshot's shareUrl instead.`,
 		if invitationRole != "" {
 			body["membershipRole"] = invitationRole
 		}
-		if invitationExpiresIn != "" {
-			body["expiresIn"] = invitationExpiresIn
+		if invitationExpiresAt != "" {
+			body["expiresAt"] = invitationExpiresAt
 		}
 		data, err := api.Post(cmd.Context(), "/groups/"+group+"/invitations", write(body))
 		if err != nil {
@@ -82,13 +84,14 @@ var invitationRevokeCmd = &cobra.Command{
 var invitationAcceptCmd = &cobra.Command{
 	Use:   "accept INVITATION_TOKEN GROUP_TOKEN",
 	Short: "Accept an invitation and join the group",
+	Long:  "Accept an invitation and join the group. Returns the participant you are now linked to.",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 1)
 		if err != nil {
 			return err
 		}
-		data, err := api.Post(cmd.Context(), "/groups/"+group+"/invitations/"+args[0]+"/accept", write(nil))
+		data, err := api.Post(cmd.Context(), "/groups/"+group+"/invitations/"+args[0]+"/acceptance", write(nil))
 		if err != nil {
 			return err
 		}
@@ -99,6 +102,7 @@ var invitationAcceptCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(invitationCmd)
 	invitationCmd.AddCommand(invitationListCmd, invitationCreateCmd, invitationRevokeCmd, invitationAcceptCmd)
+	addIdempotencyFlag(invitationCreateCmd, invitationRevokeCmd, invitationAcceptCmd)
 	invitationCreateCmd.Flags().StringVar(&invitationRole, "role", "", "Role for whoever accepts: read_only, editor, admin")
-	invitationCreateCmd.Flags().StringVar(&invitationExpiresIn, "expires-in", "", "Expiry window: 24h, 7d, 30d")
+	invitationCreateCmd.Flags().StringVar(&invitationExpiresAt, "expires-at", "", "When the link stops working, ISO 8601 with an offset")
 }

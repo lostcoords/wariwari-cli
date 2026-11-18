@@ -22,10 +22,10 @@ func TestEmbeddedSkillDocumentsCurrentContract(t *testing.T) {
 		"Transaction reads always include `timeOfDay`, but it can be `null`",
 		"Free API keys can read with a monthly limit; writes need wariwari Pro",
 		"`PRO_REQUIRED`",
-		"`AUTH_CREDENTIALS_EXPIRED`",
+		"`ALREADY_REMINDED`",
 		"`INTERNAL_SERVER_EXCEPTION`",
 		"`QUOTA_EXCEEDED`",
-		"as `--lock-version` for deletes",
+		"as `--lock-version` for updates, deletes and merges",
 	} {
 		if !strings.Contains(skill, want) {
 			t.Fatalf("embedded skill is missing %q", want)
@@ -34,6 +34,12 @@ func TestEmbeddedSkillDocumentsCurrentContract(t *testing.T) {
 	for _, stale := range []string{"no monthly usage quota", "¥980", "50 calls"} {
 		if strings.Contains(skill, stale) {
 			t.Fatalf("embedded skill states %q; the server's error owns the price and limit", stale)
+		}
+	}
+	// Names the API renamed or codes it stopped sending.
+	for _, gone := range []string{"groupCategor", "paidByToken", "fromToken", "toToken", "lockVersions", "transactionTokens", "IDEMPOTENCY_IN_PROGRESS", "AUTH_CREDENTIALS_EXPIRED"} {
+		if strings.Contains(skill, gone) {
+			t.Fatalf("embedded skill still names %q", gone)
 		}
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lostcoords/wariwari-cli/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +20,8 @@ const reminderSendHelp = `Remind members of what they owe, by push or email. Wit
 remind that member; without it, remind everyone who owes and whom you may
 remind (an admin, anyone; other members, the people who owe them). Members who
 are not reminded are listed under "skipped" with the reason: unlinked,
-opted_out or recently_reminded. Each member is reminded at most once a day.
+opted_out or recently_reminded. Each member is reminded at most once a day:
+naming one already reminded today is 409 ALREADY_REMINDED.
 Needs Pro on your account; otherwise 403 PRO_REQUIRED.`
 
 var reminderSendCmd = &cobra.Command{
@@ -109,7 +109,7 @@ always works, and succeeds when they are already off.`,
 		path := "/groups/" + group + "/reminder_schedule"
 		switch args[0] {
 		case "off":
-			if _, err := api.Delete(cmd.Context(), path, client.Write{}); err != nil {
+			if _, err := api.Delete(cmd.Context(), path, write(nil)); err != nil {
 				return err
 			}
 			return printOK(map[string]any{"token": group, "reminders": "off"}, "Reminders off")
@@ -118,7 +118,7 @@ always works, and succeeds when they are already off.`,
 			if err != nil {
 				return err
 			}
-			data, err := api.Patch(cmd.Context(), path, client.Write{Body: map[string]any{"cadence": "weekly", "weekday": weekday}})
+			data, err := api.Put(cmd.Context(), path, write(map[string]any{"cadence": "weekly", "weekday": weekday}))
 			if err != nil {
 				return err
 			}
@@ -127,7 +127,7 @@ always works, and succeeds when they are already off.`,
 			if reminderDay < 1 || reminderDay > 28 {
 				return fmt.Errorf("monthly reminders need --day between 1 and 28")
 			}
-			data, err := api.Patch(cmd.Context(), path, client.Write{Body: map[string]any{"cadence": "monthly", "day": reminderDay}})
+			data, err := api.Put(cmd.Context(), path, write(map[string]any{"cadence": "monthly", "day": reminderDay}))
 			if err != nil {
 				return err
 			}
@@ -157,7 +157,7 @@ func init() {
 	rootCmd.AddCommand(reminderCmd, remindCmd)
 	reminderCmd.AddCommand(reminderSendCmd, reminderScheduleCmd)
 	reminderScheduleCmd.AddCommand(reminderScheduleShowCmd)
-	addIdempotencyFlag(reminderSendCmd, remindCmd)
+	addIdempotencyFlag(reminderSendCmd, remindCmd, reminderScheduleCmd)
 	for _, cmd := range []*cobra.Command{reminderSendCmd, remindCmd} {
 		cmd.Flags().StringVar(&reminderParticipant, "participant", "", "Remind only this participant token")
 	}

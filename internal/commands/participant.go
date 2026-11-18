@@ -30,9 +30,9 @@ participants list endpoint.`,
 var participantCreateCmd = &cobra.Command{
 	Use:   "create [GROUP_TOKEN]",
 	Short: "Create a participant from JSON",
-	Long: `Create a participant from JSON: name, optional color (one of the palette
-hex values in the API spec) and an optional client-generated 24-character
-base58 token. Reusing a token returns 409 DUPLICATE_TOKEN; retry a create
+	Long: `Create a participant from JSON: name, optional color (an uppercase hex
+string from the server's palette, such as "#1F3A5F") and an optional
+client-generated 24-character base58 token. Reusing a token returns 409 DUPLICATE_TOKEN; retry a create
 safely with --idempotency-key instead.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,9 +74,8 @@ var participantExampleUpdateCmd = &cobra.Command{
 	Short: "Example payload for updating a participant",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"name":        "Ada Lovelace",
-			"color":       "#1F3A5F",
-			"lockVersion": 0,
+			"name":  "Ada Lovelace",
+			"color": "#1F3A5F",
 		}, "Participant update example")
 	},
 }
@@ -84,9 +83,10 @@ var participantExampleUpdateCmd = &cobra.Command{
 var participantUpdateCmd = &cobra.Command{
 	Use:   "update PARTICIPANT_TOKEN [GROUP_TOKEN]",
 	Short: "Update a participant from JSON",
-	Long: `Update a participant. lockVersion is required — send the value from the
-current snapshot. A stale value returns 409 CONFLICT with the fresh participant
-under "current".`,
+	Long: `Update a participant: name and color for a guest, or membershipRole
+(read_only, editor, admin) for a member linked to an account. A linked member
+takes their name and colour from their account, so sending those for one is a
+400, and so is a role for a guest. Returns the participant.` + guardedUpdateHelp,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 1)
@@ -97,7 +97,11 @@ under "current".`,
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/participants/"+args[0], write(body))
+		w, err := revisedWrite(cmd, body, snapshotRecord(group, "participants", args[0]))
+		if err != nil {
+			return err
+		}
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/participants/"+args[0], w)
 		if err != nil {
 			return err
 		}
@@ -119,11 +123,10 @@ var participantDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/participants/"+args[0], w)
-		if err != nil {
+		if _, err := api.Delete(cmd.Context(), "/groups/"+group+"/participants/"+args[0], w); err != nil {
 			return err
 		}
-		return printOK(data, "Participant deleted")
+		return printOK(map[string]any{"token": args[0], "deleted": true}, "Participant deleted")
 	},
 }
 
@@ -151,7 +154,7 @@ currency, which are balanced separately and left out here.`,
 }
 
 func init() {
-	addLockVersionFlag(participantDeleteCmd)
+	addLockVersionFlag(participantUpdateCmd, participantDeleteCmd)
 	addDataFlags(participantCreateCmd, participantUpdateCmd)
 	addIdempotencyFlag(participantCreateCmd, participantUpdateCmd, participantDeleteCmd)
 	rootCmd.AddCommand(participantCmd)

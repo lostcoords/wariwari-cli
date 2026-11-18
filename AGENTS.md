@@ -19,23 +19,23 @@ The CLI talks to WariWari's `/v1` JSON API with `Authorization: Bearer <token>`.
 The token is a developer API key (`wari_…`). `auth login TOKEN` saves one, and
 `auth login` with no argument gets one through the browser (below).
 The authoritative contract is the OpenAPI 3.1 bundle in the server repo
-(`openapi/dist/wariwari.bundled.yaml`) and its prose spec (`docs/specs/api.md`).
-Check a route there before adding or changing one here.
+(`openapi/dist/wariwari.bundled.yaml`). Check a route there before adding or
+changing one here.
 
 ### Wire format
 
 **Every field is camelCase**: `lockVersion`, `amountCents`, `splitType`,
-`paidByToken`, `participantToken`, `emailAddress`, `groupCategoryToken`,
+`paidByParticipantToken`, `participantToken`, `emailAddress`, `categoryToken`,
 `{ "pagination": { "hasMore", "cursor" } }`.
 
 Two carve-outs:
 
 - Maps keyed by data pass through untouched — `fxRates`,
   `spendingByCurrency`, `netByCurrency` (keyed by ISO-4217 code; `netByCurrency`'s
-  inner objects by participant token), and on requests `splitPercentages` /
-  `splitShares` (keyed by participant token).
+  inner objects by participant token).
 - Values are never converted. Enum strings stay snake_case (`read_only`), as do
-  URL path segments (`/fx_rate`) and path parameters (`:group_token`).
+  URL path segments (`/fx_rate`) and path parameters (`:group_token`). Enums
+  are open: pass an unknown value through, never fail on it.
 
 ### Routes the CLI uses
 
@@ -49,67 +49,64 @@ Two carve-outs:
 | `group list`                 | `GET /v1/groups` (`archived`, `take`, `cursor`)               |
 | `group create`               | `POST /v1/groups`                                             |
 | `group show` / `snapshot`    | `GET /v1/groups/:group_token`                                 |
-| `group update`               | `PATCH /v1/groups/:group_token`                               |
+| `group update`               | `PATCH /v1/groups/:group_token` (+ rev; also `visibility`)    |
 | `group delete`               | `DELETE /v1/groups/:group_token` (+ expected revision)        |
 | `group activity`             | `GET /v1/groups/:group_token/activity`                        |
 | `group archive` / `unarchive`| `POST` / `DELETE /v1/groups/:group_token/archival`            |
-| `group dismiss`              | `POST /v1/groups/:group_token/dismissal`                      |
 | `group duplicate`            | `POST /v1/groups/:group_token/duplication`                    |
-| `group join`                 | `POST /v1/groups/:group_token/membership`                     |
-| `group notifications`        | `GET` / `PATCH /v1/groups/:g/notification_settings` (`muted`) |
+| `group join` / `leave`       | `POST` / `DELETE /v1/groups/:group_token/membership`          |
+| `group notifications`        | `GET` / `PUT /v1/groups/:g/notification_settings` (`muted`)   |
 | `group stats`                | `GET /v1/groups/:group_token/stats` (filters below)           |
 | `group fx-rate`              | `GET /v1/groups/:group_token/fx_rate` (`from`, `date`)        |
 | `group export`               | `GET /v1/groups/:group_token/csv_export` (`text/csv`)         |
-| `group settings`             | `GET /v1/groups/:group_token/settings`                        |
-| `group settings update`      | `PATCH /v1/groups/:group_token/settings`                      |
 | `balance`                    | `GET /v1/groups/:group_token` (derived)                       |
 | `participant list`           | `GET /v1/groups/:group_token` (derived)                       |
 | `participant balance`        | `GET /v1/groups/:g/participants/:token/balance`               |
 | `participant create`         | `POST /v1/groups/:group_token/participants`                   |
-| `participant update`         | `PATCH /v1/groups/:group_token/participants/:token`           |
+| `participant update`         | `PATCH /v1/groups/:group_token/participants/:token` (+ rev; also `membershipRole`) |
 | `participant delete`         | `DELETE /v1/groups/:group_token/participants/:token` (+ rev)  |
 | `participant merge`          | `POST /v1/groups/:g/participants/:token/merge` (+ rev)        |
-| `participant move`           | `PATCH /v1/groups/:g/participants/:token/position` (+ rev)    |
+| `participant move`           | `PATCH /v1/groups/:g/participants/:token/position` (`position`, no rev) |
 | `participant claim`          | `POST /v1/groups/:g/participants/:token/claim`                |
-| `participant unlink`         | `DELETE /v1/groups/:g/participants/:token/link`               |
 | `category list`              | `GET /v1/groups/:group_token` (derived)                       |
 | `category create`            | `POST /v1/groups/:group_token/categories`                     |
-| `category update`            | `PATCH /v1/groups/:group_token/categories/:token`             |
+| `category update`            | `PATCH /v1/groups/:group_token/categories/:token` (+ rev)     |
 | `category delete`            | `DELETE /v1/groups/:group_token/categories/:token` (+ rev)    |
 | `transaction list`           | `GET /v1/groups/:g/transactions` (filters below)              |
 | `transaction show`           | `GET /v1/groups/:g/transactions/:transaction_token`           |
 | `transaction create`         | `POST /v1/groups/:g/transactions`                             |
-| `transaction update`         | `PATCH /v1/groups/:g/transactions/:transaction_token`         |
+| `transaction update`         | `PATCH /v1/groups/:g/transactions/:transaction_token` (+ rev) |
 | `transaction delete`         | `DELETE /v1/groups/:g/transactions/:transaction_token` (+ rev)|
 | `transaction activity`       | `GET /v1/groups/:g/transactions/:t/activity`                  |
-| `transaction bulk-edit`      | `POST /v1/groups/:g/transaction_bulk_edit` (`lockVersions`)   |
-| `transaction bulk-delete`    | `DELETE /v1/groups/:g/transaction_bulk_edit` (`lockVersions`) |
-| `payment create`             | `POST /v1/groups/:g/payments`                                 |
-| `payment update`             | `PATCH /v1/groups/:g/payments/:payment_token`                 |
+| `transaction bulk-edit`      | `PATCH /v1/groups/:g/transaction_batch` (`expectedRevision` per item) |
+| `transaction bulk-delete`    | `POST /v1/groups/:g/transaction_deletions` (same items)       |
+| `payment create`             | `POST /v1/groups/:g/transactions` (`kind: payment`)           |
+| `payment update`             | `PATCH /v1/groups/:g/transactions/:transaction_token` (`kind: payment`, + rev) |
 | `invitation list`            | `GET /v1/groups/:g/invitations`                               |
 | `invitation create`          | `POST /v1/groups/:g/invitations`                              |
 | `invitation revoke`          | `DELETE /v1/groups/:g/invitations/:invitation_token`          |
-| `invitation accept`          | `POST /v1/groups/:g/invitations/:invitation_token/accept`     |
+| `invitation accept`          | `POST /v1/groups/:g/invitations/:invitation_token/acceptance` |
 | `access-request status`      | `GET /v1/groups/:g/access_request`                            |
 | `access-request create`      | `POST /v1/groups/:g/access_request`                           |
 | `access-request list`        | `GET /v1/groups/:g/access_requests`                           |
 | `access-request approve`     | `POST /v1/groups/:g/access_requests/:id/approval`             |
-| `access-request decline`     | `POST /v1/groups/:g/access_requests/:id/decline`              |
+| `access-request decline`     | `DELETE /v1/groups/:g/access_requests/:id`                    |
 | `transaction receipt show`   | `GET /v1/groups/:g/transactions/:t/receipt_photo`             |
 | `transaction receipt upload` | `PUT /v1/groups/:g/transactions/:t/receipt_photo` (multipart) |
 | `transaction receipt delete` | `DELETE /v1/groups/:g/transactions/:t/receipt_photo`          |
 | `reminder send` / `remind`   | `POST /v1/groups/:g/reminders` (no body: everyone who owes)   |
 | `reminder schedule show`     | `GET /v1/groups/:g/reminder_schedule` (404 = off)             |
-| `reminder schedule`          | `PATCH` / `DELETE` (`off`) `/v1/groups/:g/reminder_schedule`  |
+| `reminder schedule`          | `PUT` / `DELETE` (`off`) `/v1/groups/:g/reminder_schedule`    |
 | `file list` / `upload`       | `GET` / `POST /v1/groups/:g/attachments` (upload multipart)   |
 | `file show` / `delete`       | `GET` / `DELETE /v1/groups/:g/attachments/:id`                |
 | `recurring list` / `create`  | `GET` / `POST /v1/groups/:g/recurring_expenses`               |
 | `recurring show` / `update` / `delete` | `GET` / `PATCH` / `DELETE /v1/groups/:g/recurring_expenses/:token` |
 
-`transaction list` filters: `from`, `to` (inclusive ISO dates), `category`
-(group category token), `participant` (paid-for **or** owes-a-share), plus
-`take` / `cursor`. `group stats` takes `dateRange`, `participant` and `category`
-(both tokens), `date`, `month` (`YYYY-MM`), and `week`.
+`transaction list` filters: `from`, `to` (inclusive ISO dates), `categoryToken`,
+`participantToken` (paid-for **or** owes-a-share), plus `take` / `cursor`.
+`group stats` takes `dateRange`, `participantToken`, `categoryToken`, `date`,
+`month` (`YYYY-MM`), and `week`. The flags stay `--category` and
+`--participant`.
 
 ### Routes that do not exist
 
@@ -119,7 +116,10 @@ Do not reintroduce these — the API has no such surface:
 - `GET …/balances` — derive from the snapshot's `netByCurrency` and
   `suggestedPayments`.
 - `GET …/participants`, `GET …/categories` — no list endpoints; read
-  `participants` / `groupCategories` off the snapshot.
+  `participants` / `categories` off the snapshot.
+- `/payments`, `/settings`, `/dismissal`, `…/participants/:token/link` — a
+  payment is a transaction, visibility is on the group, a role is on the
+  participant, and leaving is `DELETE …/membership`.
 - `/v1/api_keys` (any verb) — API-key management is deliberately web-only. The
   `token` command exists only to say so.
 - `GET /v1/me` — removed; `GET /v1/account` returns the same user payload.
@@ -130,12 +130,12 @@ Do not reintroduce these — the API has no such surface:
 `internal/commands/browser_login.go`. Both requests are unauthenticated, even
 when a token is configured. `POST /v1/cli_authorizations` with `{clientName}`
 (the hostname, at most 80 characters) returns `deviceCode`, `userCode`,
-`verificationUriComplete`, `expiresIn` and `interval`. The CLI then polls
+`verificationUriComplete`, `expiresAt` and `interval`. The CLI then polls
 `POST /v1/cli_authorizations/token` with `{deviceCode}` every `interval`
-seconds. The poll returns 200 `{token, user}` once approved. A 400 problem
+seconds. The poll returns 200 `{token, account}` once approved. A 400 problem
 `code` means: `AUTHORIZATION_PENDING`, keep polling; `SLOW_DOWN`, add 5s to the
-interval for good; `ACCESS_DENIED` or `EXPIRED_TOKEN`, stop. Anything else is
-fatal, and so is passing `expiresIn`. The token is saved through the same
+interval for good; `AUTHORIZATION_DENIED` or `EXPIRED_TOKEN`, stop. Anything
+else is fatal, and so is passing `expiresAt`. The token is saved through the same
 `saveLogin` path as `auth login TOKEN`. Prompts go to stderr, and stdout carries
 only the JSON envelope.
 
@@ -144,38 +144,46 @@ only the JSON envelope.
 The CLI authenticates with a developer API key (`wari_…`), and these routes
 answer it with `403 ACCESS_DENIED`, so the CLI does not wrap them:
 `/v1/account/sessions*`, `/v1/account/identities*`,
-`/v1/account/payment_methods*`, `/v1/account/device_tokens*`,
-`/v1/account/email_change`, `DELETE /v1/account`, and the imports.
+`/v1/account/payment_methods*`, `/v1/account/device_tokens`,
+`/v1/account/email_change`, `DELETE /v1/account`, and the imports
+(`/v1/import_drafts*`, `…/groups/:g/imports`). They are absent from the public
+bundle the CLI vendors.
 
-Updates are **PATCH**. The one PUT is the multipart receipt photo upload;
-uploads go through `client.Client.Upload`, and JSON bodies never go by PUT.
+Partial updates are **PATCH**. **PUT** replaces a whole singleton: notification
+settings, the reminder schedule, and the multipart receipt photo. Uploads go
+through `client.Client.Upload`.
 `receipt show` and `schedule show` read a 404 as "none" only after the parent
 expense or group reads (`absentOn404`).
 
 ### Semantics worth remembering
 
-- **Group-resource writes return the refreshed group snapshot** (`201`/`200`),
-  including deletes of nested resources and access-request approvals. Group
-  delete, archive/unarchive, invitation revoke and access-request decline are
-  `204`; the client returns nil and the command prints its own result.
-  `account update` returns the account, `invitation create` the invitation.
-- **`lockVersion` is required on every update.** Omitting it is
-  `400 VALIDATION_FAILED`; a stale value is `409 CONFLICT`, with the fresh record
-  under `current` for groups, categories, transactions and participants
-  (`current` is absent for other records).
-- **Deletes, merges and moves are guarded too.** They carry the target's
-  `lockVersion` in the `WariWari-Expected-Revision` header
-  (`client.Write.ExpectedRevision`). `revisedWrite` sends `--lock-version` when
-  given, otherwise reads the record first; a record the read cannot find goes
-  at revision 0, so the server answers (an already deleted record succeeds
-  again, an unknown one is 404). Bulk edits carry a `lockVersions` map instead.
+- **A write returns the resource it changed, and a delete answers `204`.**
+  Only `GET /v1/groups/:group_token` returns the snapshot. On a `204` the
+  client returns nil and the command prints its own result. `group create`
+  returns the group without participants; join, claim, invitation accept and
+  access-request approval return the participant.
+- **Every update, delete and merge of a record with a `lockVersion` sends it in
+  the `Expected-Revision` header** (`client.Write.ExpectedRevision`), never in
+  the body: groups, categories, participants, transactions. `revisedWrite`
+  sends `--lock-version` when given, otherwise reads the record first; a record
+  the read cannot find goes at revision 0, so the server answers (an already
+  deleted record succeeds again, an unknown one is 404). A stale value is
+  `409 CONFLICT` with the fresh record under `current`, keyed by its kind
+  (`current.transaction`). Creates and reorders send none, a recurring expense
+  has no `lockVersion`, and bulk edits and deletes carry `expectedRevision` on
+  each item of `transactions`.
 - **`POST /v1/groups` works with developer keys**, 20 groups an hour.
 - **`--idempotency-key` exists exactly where the operation declares
-  `Idempotency-Key`** (most group writes; not invitations, notification
-  settings, participant unlink or account update). `spec_test.go` enforces it.
-- **Errors are RFC 9457 Problem Details**: `type`, `title`, `status`, `detail`,
-  `code`, `instance`, plus `errors` (validation) and `current` (409). Switch on
-  `code`; `VALIDATION_FAILED` is a `400`, not a `422`. A `429` is
+  `Idempotency-Key`**: every write under a group and `group create`, not
+  account update or feedback. `spec_test.go` enforces it.
+- **The CLI sends no `Recorded-At`.** The header dates a write a client queued
+  offline, and the CLI writes as it runs. It reads no `Read-Model-Version`
+  either: it holds no group between commands.
+- **Every failure is one Problem body**: `code`, `title`, `detail`, `status`,
+  `instance`, plus `errors` (validation, keyed by wire field path or header
+  name) and `current` (409 CONFLICT). There is no `type`. Switch on `code`;
+  `VALIDATION_FAILED` is a `400`, not a `422`. A second reminder to one member
+  in a day is `409 ALREADY_REMINDED`. A `429` is
   `RATE_LIMIT_EXCEEDED` or `QUOTA_EXCEEDED`, with `Retry-After`.
   `403 PRO_REQUIRED` and `429 QUOTA_EXCEEDED` carry `upgradeUrl`, and their
   `detail` states the price and limit: print it as sent, never a copy.

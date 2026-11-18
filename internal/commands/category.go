@@ -11,8 +11,8 @@ var categoryListCmd = &cobra.Command{
 	Use:     "list [GROUP_TOKEN]",
 	Aliases: []string{"ls"},
 	Short:   "List categories",
-	Long: `List a group's categories, read out of the group snapshot's groupCategories —
-there is no categories list endpoint.`,
+	Long: `List a group's categories, read out of the group snapshot's categories —
+there is no categories list endpoint. An expense names one by categoryToken.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 0)
@@ -23,7 +23,7 @@ there is no categories list endpoint.`,
 		if err != nil {
 			return err
 		}
-		return printOK(map[string]any{"groupCategories": snapshotList(snapshot, "groupCategories")}, "Categories")
+		return printOK(map[string]any{"categories": snapshotList(snapshot, "categories")}, "Categories")
 	},
 }
 
@@ -71,10 +71,9 @@ var categoryExampleUpdateCmd = &cobra.Command{
 	Short: "Example payload for updating a category",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"name":        "Food",
-			"emoji":       "🍜",
-			"position":    1,
-			"lockVersion": 0,
+			"name":     "Food",
+			"emoji":    "🍜",
+			"position": 1,
 		}, "Category update example")
 	},
 }
@@ -82,9 +81,8 @@ var categoryExampleUpdateCmd = &cobra.Command{
 var categoryUpdateCmd = &cobra.Command{
 	Use:   "update CATEGORY_TOKEN [GROUP_TOKEN]",
 	Short: "Update a category from JSON",
-	Long: `Update a category. lockVersion is required — send the value from the current
-snapshot. A stale value returns 409 CONFLICT with the fresh category under
-"current".`,
+	Long: `Update a category: send only what changes of name, emoji and position.
+Returns the category.` + guardedUpdateHelp,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 1)
@@ -95,7 +93,11 @@ snapshot. A stale value returns 409 CONFLICT with the fresh category under
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/categories/"+args[0], write(body))
+		w, err := revisedWrite(cmd, body, snapshotRecord(group, "categories", args[0]))
+		if err != nil {
+			return err
+		}
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/categories/"+args[0], w)
 		if err != nil {
 			return err
 		}
@@ -113,20 +115,19 @@ var categoryDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		w, err := revisedWrite(cmd, nil, snapshotRecord(group, "groupCategories", args[0]))
+		w, err := revisedWrite(cmd, nil, snapshotRecord(group, "categories", args[0]))
 		if err != nil {
 			return err
 		}
-		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/categories/"+args[0], w)
-		if err != nil {
+		if _, err := api.Delete(cmd.Context(), "/groups/"+group+"/categories/"+args[0], w); err != nil {
 			return err
 		}
-		return printOK(data, "Category deleted")
+		return printOK(map[string]any{"token": args[0], "deleted": true}, "Category deleted")
 	},
 }
 
 func init() {
-	addLockVersionFlag(categoryDeleteCmd)
+	addLockVersionFlag(categoryUpdateCmd, categoryDeleteCmd)
 	addDataFlags(categoryCreateCmd, categoryUpdateCmd)
 	addIdempotencyFlag(categoryCreateCmd, categoryUpdateCmd, categoryDeleteCmd)
 	rootCmd.AddCommand(categoryCmd)

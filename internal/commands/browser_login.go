@@ -15,17 +15,17 @@ import (
 // cliAuthorization is the RFC 8628 device authorization the API hands out
 // before a human approves the login in the browser.
 type cliAuthorization struct {
-	DeviceCode              string `json:"deviceCode"`
-	UserCode                string `json:"userCode"`
-	VerificationURI         string `json:"verificationUri"`
-	VerificationURIComplete string `json:"verificationUriComplete"`
-	ExpiresIn               int    `json:"expiresIn"`
-	Interval                int    `json:"interval"`
+	DeviceCode              string    `json:"deviceCode"`
+	UserCode                string    `json:"userCode"`
+	VerificationURI         string    `json:"verificationUri"`
+	VerificationURIComplete string    `json:"verificationUriComplete"`
+	ExpiresAt               time.Time `json:"expiresAt"`
+	Interval                int       `json:"interval"`
 }
 
 type browserLoginResult struct {
-	Token string
-	User  map[string]any
+	Token   string
+	Account map[string]any
 }
 
 // sleepFor waits between token polls; tests swap it to skip the wait and
@@ -94,7 +94,7 @@ func browserLogin(ctx context.Context, apiURL string, openBrowser bool) (browser
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	remaining := time.Duration(authorization.ExpiresIn) * time.Second
+	remaining := time.Until(authorization.ExpiresAt)
 	for {
 		if remaining <= 0 {
 			return browserLoginResult{}, errLoginExpired
@@ -111,8 +111,8 @@ func browserLogin(ctx context.Context, apiURL string, openBrowser bool) (browser
 			if token == "" {
 				return browserLoginResult{}, fmt.Errorf("unexpected token response from %s", apiURL)
 			}
-			user, _ := body["user"].(map[string]any)
-			return browserLoginResult{Token: token, User: user}, nil
+			account, _ := body["account"].(map[string]any)
+			return browserLoginResult{Token: token, Account: account}, nil
 		}
 		if ctx.Err() != nil {
 			return browserLoginResult{}, errLoginCancelled
@@ -126,7 +126,7 @@ func browserLogin(ctx context.Context, apiURL string, openBrowser bool) (browser
 		case "AUTHORIZATION_PENDING":
 		case "SLOW_DOWN":
 			interval += 5 * time.Second
-		case "ACCESS_DENIED":
+		case "AUTHORIZATION_DENIED":
 			return browserLoginResult{}, errors.New("Login was denied in the browser.")
 		case "EXPIRED_TOKEN":
 			return browserLoginResult{}, errLoginExpired
@@ -162,9 +162,9 @@ func stdinIsTerminal() bool {
 }
 
 // userLabel picks the email, else the name, from an account payload.
-func userLabel(user map[string]any) string {
+func userLabel(account map[string]any) string {
 	for _, key := range []string{"emailAddress", "name"} {
-		if value, ok := user[key].(string); ok && value != "" {
+		if value, ok := account[key].(string); ok && value != "" {
 			return value
 		}
 	}

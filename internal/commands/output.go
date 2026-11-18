@@ -68,9 +68,9 @@ func printErr(err error) {
 	msg := err.Error()
 	if jsonOutput || quiet || agent {
 		payload := map[string]any{"message": msg}
-		// API failures are RFC 9457 Problem Details. Pass the whole document
-		// through so a caller can switch on `code` and reconcile against the
-		// `current` record a stale write was rejected against.
+		// Pass the API's whole Problem through so a caller can switch on `code`
+		// and reconcile against the `current` record a stale write was
+		// rejected against.
 		var apiErr *client.Error
 		if errors.As(err, &apiErr) {
 			payload = apiErr.Problem()
@@ -89,10 +89,8 @@ func printErr(err error) {
 			}
 		}
 		switch {
-		case apiErr.Code() == "CONFLICT" && apiErr.Body["current"] != nil:
-			fmt.Fprintln(errOut, "  Re-read the record and retry with the lockVersion from `current`.")
 		case apiErr.Code() == "CONFLICT":
-			fmt.Fprintln(errOut, "  Re-read the record and retry with its latest lockVersion.")
+			fmt.Fprintln(errOut, "  "+conflictHint(apiErr.Body["current"]))
 		case apiErr.Code() == "PRO_REQUIRED" || apiErr.Code() == "QUOTA_EXCEEDED":
 			// The server's detail states the price and limit; the CLI adds only
 			// where to buy Pro and when a quota resets.
@@ -106,6 +104,19 @@ func printErr(err error) {
 			fmt.Fprintf(errOut, "  Retry after %s seconds.\n", apiErr.RetryAfter)
 		}
 	}
+}
+
+// conflictHint names the lockVersion to retry at. A 409 CONFLICT carries the
+// fresh record under the one key that names its kind, or no `current` at all.
+func conflictHint(current any) string {
+	records, _ := current.(map[string]any)
+	for _, kind := range sortedKeys(records) {
+		record, _ := records[kind].(map[string]any)
+		if revision, err := lockVersion(record); err == nil {
+			return fmt.Sprintf("The %s is now at lockVersion %d; review it under `current`, then retry at that revision.", kind, revision)
+		}
+	}
+	return "Re-read the record and retry with its latest lockVersion."
 }
 
 // roughDuration reads a monthly quota's Retry-After as days or hours.
@@ -210,7 +221,7 @@ func jsonShape(v any) (any, error) {
 
 // collectionKeys are the camelCase array fields the API nests rows under, in
 // the order --count and --ids-only should prefer them.
-var collectionKeys = []string{"groups", "transactions", "participants", "groupCategories", "activity", "suggestedPayments", "accessRequests", "recurringExpenses", "reminded", "attachments"}
+var collectionKeys = []string{"groups", "transactions", "participants", "categories", "activity", "suggestedPayments", "accessRequests", "recurringExpenses", "reminded", "attachments"}
 
 func countData(v any) int {
 	switch data := v.(type) {

@@ -71,7 +71,7 @@ var accessRequestListCmd = &cobra.Command{
 var accessRequestApproveCmd = &cobra.Command{
 	Use:   "approve ACCESS_REQUEST_ID [GROUP_TOKEN]",
 	Short: "Approve a request and add the requester as an editor",
-	Long:  "Approve a pending request. Admin-only. The requester joins as an editor and is notified. Returns the refreshed group snapshot.",
+	Long:  "Approve a pending request. Admin-only. The requester joins as an editor and is notified. Returns their participant.",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 1)
@@ -96,7 +96,7 @@ var accessRequestDeclineCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if _, err := api.Post(cmd.Context(), "/groups/"+group+"/access_requests/"+args[0]+"/decline", write(nil)); err != nil {
+		if _, err := api.Delete(cmd.Context(), "/groups/"+group+"/access_requests/"+args[0], write(nil)); err != nil {
 			return err
 		}
 		return printOK(map[string]any{"id": args[0], "declined": true}, "Access request declined")

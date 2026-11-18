@@ -4,22 +4,22 @@ import "github.com/spf13/cobra"
 
 var groupIncludeMembers bool
 
-var groupDismissCmd = &cobra.Command{
-	Use:   "dismiss [TOKEN]",
-	Short: "Leave a group: drop it from your list and unlink your participant",
-	Long: `Remove the group from your list: clears any archive record and unlinks
-your participant rows. The group and its data stay for everyone else. The last
-admin of a private or view-only group gets 400 VALIDATION_FAILED.`,
+var groupLeaveCmd = &cobra.Command{
+	Use:   "leave [TOKEN]",
+	Short: "Leave a group: unlink your account from your participant",
+	Long: `Stop being a member. Your participant stays in the group as a guest with
+its history, and the group leaves your list and your archive. The last admin
+of a private or view-only group gets 400 VALIDATION_FAILED.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
-		if _, err := api.Post(cmd.Context(), "/groups/"+group+"/dismissal", write(nil)); err != nil {
+		if _, err := api.Delete(cmd.Context(), "/groups/"+group+"/membership", write(nil)); err != nil {
 			return err
 		}
-		return printOK(map[string]any{"token": group, "dismissed": true}, "Group dismissed")
+		return printOK(map[string]any{"token": group, "left": true}, "Left group")
 	},
 }
 
@@ -27,7 +27,7 @@ var groupDuplicateCmd = &cobra.Command{
 	Use:   "duplicate [TOKEN]",
 	Short: "Start a new group with this one's categories",
 	Long: `Create a new group with this group's categories, and with
---include-members its participants too. Returns the new group's snapshot.`,
+--include-members its participants too. Returns the new group.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 0)
@@ -46,9 +46,10 @@ var groupDuplicateCmd = &cobra.Command{
 var groupJoinCmd = &cobra.Command{
 	Use:   "join [TOKEN]",
 	Short: "Join a public group you have the link to",
-	Long: `Become a registered member of a public-editable group. Joining a group you
-already belong to returns its snapshot. For a private group, ask with
-"wariwari access-request create" or accept an invitation.`,
+	Long: `Become a registered member of a public-editable group and get your
+participant back; joining a group you already belong to returns it too. For a
+private group, ask with "wariwari access-request create" or accept an
+invitation.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 0)
@@ -98,7 +99,7 @@ func notificationToggle(use string, muted bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			data, err := api.Patch(cmd.Context(), "/groups/"+group+"/notification_settings",
+			data, err := api.Put(cmd.Context(), "/groups/"+group+"/notification_settings",
 				write(map[string]any{"muted": muted}))
 			if err != nil {
 				return err
@@ -109,8 +110,8 @@ func notificationToggle(use string, muted bool) *cobra.Command {
 }
 
 func init() {
-	groupCmd.AddCommand(groupDismissCmd, groupDuplicateCmd, groupJoinCmd, groupNotificationsCmd)
+	groupCmd.AddCommand(groupLeaveCmd, groupDuplicateCmd, groupJoinCmd, groupNotificationsCmd)
 	groupNotificationsCmd.AddCommand(groupNotificationsShowCmd, groupNotificationsMuteCmd, groupNotificationsUnmuteCmd)
-	addIdempotencyFlag(groupDismissCmd, groupDuplicateCmd, groupJoinCmd)
+	addIdempotencyFlag(groupLeaveCmd, groupDuplicateCmd, groupJoinCmd, groupNotificationsMuteCmd, groupNotificationsUnmuteCmd)
 	groupDuplicateCmd.Flags().BoolVar(&groupIncludeMembers, "include-members", false, "Copy the participants too")
 }

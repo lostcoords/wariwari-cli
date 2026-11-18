@@ -14,9 +14,12 @@ import (
 	"github.com/lostcoords/wariwari-cli/internal/config"
 )
 
-const authorizationJSON = `{"deviceCode":"dev_123","userCode":"BCDF-GHJK",
+// authorizationJSON is a device authorization that expires in ten minutes.
+func authorizationJSON() string {
+	return `{"deviceCode":"dev_123","userCode":"BCDF-GHJK",
 	"verificationUri":"https://wariwari.jp/cli","verificationUriComplete":"https://wariwari.jp/cli?code=BCDF-GHJK",
-	"expiresIn":600,"interval":5}`
+	"expiresAt":"` + time.Now().Add(10*time.Minute).Format(time.RFC3339Nano) + `","interval":5}`
+}
 
 // deviceFlowServer fakes both endpoints. Each token poll takes the next reply: each poll takes the next
 // in order: a problem code, or "" for success.
@@ -34,7 +37,7 @@ func deviceFlowServer(t *testing.T, replies ...string) http.HandlerFunc {
 				t.Errorf("clientName missing from %s", body)
 			}
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(authorizationJSON))
+			_, _ = w.Write([]byte(authorizationJSON()))
 		case "/v1/cli_authorizations/token":
 			if !strings.Contains(string(body), `"deviceCode":"dev_123"`) {
 				t.Errorf("token poll body = %s", body)
@@ -45,7 +48,7 @@ func deviceFlowServer(t *testing.T, replies ...string) http.HandlerFunc {
 			reply := replies[polls]
 			polls++
 			if reply == "" {
-				_, _ = w.Write([]byte(`{"token":"wari_fresh","user":{"id":2,"emailAddress":"ada@example.com","name":"Ada"}}`))
+				_, _ = w.Write([]byte(`{"token":"wari_fresh","account":{"analyticsId":"acct_2","emailAddress":"ada@example.com","name":"Ada"}}`))
 				return
 			}
 			w.WriteHeader(http.StatusBadRequest)
@@ -133,7 +136,7 @@ func TestBrowserLoginPollsSlowsDownAndSavesTheToken(t *testing.T) {
 func TestBrowserLoginStopsWhenDenied(t *testing.T) {
 	stubDeviceFlow(t)
 	cfg := &config.Config{APIURL: "http://example.invalid"}
-	_, _, _, err := runRootCommand(t, cfg, deviceFlowServer(t, "AUTHORIZATION_PENDING", "ACCESS_DENIED"), "auth", "login")
+	_, _, _, err := runRootCommand(t, cfg, deviceFlowServer(t, "AUTHORIZATION_PENDING", "AUTHORIZATION_DENIED"), "auth", "login")
 	if err == nil || err.Error() != "Login was denied in the browser." {
 		t.Fatalf("error = %v", err)
 	}
@@ -151,7 +154,7 @@ func TestBrowserLoginStopsWhenExpired(t *testing.T) {
 	}
 }
 
-func TestBrowserLoginGivesUpAtExpiresIn(t *testing.T) {
+func TestBrowserLoginGivesUpAtExpiresAt(t *testing.T) {
 	waits, _ := stubDeviceFlow(t)
 	pending := make([]string, 120)
 	for i := range pending {

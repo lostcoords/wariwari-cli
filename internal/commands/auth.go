@@ -50,7 +50,7 @@ or set WARIWARI_TOKEN. Either way the key is saved to the active profile.`,
 		if err != nil {
 			return err
 		}
-		user := userLabel(login.User)
+		user := userLabel(login.Account)
 		fmt.Fprintf(errOut, "Logged in as %s.\n", user)
 		return printOK(map[string]any{
 			"authenticated": true,

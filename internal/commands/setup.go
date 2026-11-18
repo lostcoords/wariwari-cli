@@ -63,7 +63,7 @@ var setupCmd = &cobra.Command{
 				return err
 			}
 			token = login.Token
-			fmt.Fprintf(errOut, "Logged in as %s.\n", userLabel(login.User))
+			fmt.Fprintf(errOut, "Logged in as %s.\n", userLabel(login.Account))
 		} else if err := huh.NewInput().
 			Title("API key").
 			Description("Create one from Account -> API keys in WariWari.").

@@ -165,8 +165,8 @@ func TestAccountSummaryShowsPro(t *testing.T) {
 		args []string
 		want string
 	}{
-		{`{"token":"usr_1","pro":true}`, []string{"account", "show"}, `"summary": "Account (Pro)"`},
-		{`{"token":"usr_1","pro":false}`, []string{"me"}, `"summary": "Account (free)"`},
+		{`{"analyticsId":"acct_1","pro":true}`, []string{"account", "show"}, `"summary": "Account (Pro)"`},
+		{`{"analyticsId":"acct_1","pro":false}`, []string{"me"}, `"summary": "Account (free)"`},
 	}
 	for _, tt := range tests {
 		handler := func(w http.ResponseWriter, _ *http.Request) {

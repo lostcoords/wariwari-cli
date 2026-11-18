@@ -35,7 +35,14 @@ func addIdempotencyFlag(cmds ...*cobra.Command) {
 const guardedDeleteHelp = `Delete the record. The API checks its lockVersion: pass --lock-version with
 the value you read to have a concurrent edit rejected with 409 CONFLICT, or let
 the CLI read the current one first. Deleting a record that is already gone
-succeeds again. Returns the refreshed group snapshot.`
+succeeds again.`
+
+const guardedUpdateHelp = `
+
+The API checks the record's lockVersion, which travels in the Expected-Revision
+header and never in the body: pass --lock-version with the value you read to
+have a concurrent edit rejected with 409 CONFLICT (the fresh record comes back
+under "current"), or let the CLI read the current one first.`
 
 func addLockVersionFlag(cmds ...*cobra.Command) {
 	for _, cmd := range cmds {
@@ -58,7 +65,7 @@ func write(body any) client.Write {
 // from.
 var errRecordMissing = errors.New("record not found")
 
-// revisedWrite adds WariWari-Expected-Revision. Without --lock-version it
+// revisedWrite adds Expected-Revision. Without --lock-version it
 // reads the record first, so the write applies to whatever is current; pass
 // the lockVersion you acted on to have a concurrent edit rejected instead.
 //

@@ -59,9 +59,10 @@ var groupShowCmd = &cobra.Command{
 	Use:     "show [TOKEN]",
 	Aliases: []string{"view", "snapshot"},
 	Short:   "Fetch the full group snapshot",
-	Long: `Fetch a group snapshot: metadata, shareUrl (the invite link),
-groupCategories, participants, transactions, netByCurrency, suggestedPayments
-and spending totals.
+	Long: `Fetch a group snapshot: metadata, visibility, shareUrl (the invite link),
+categories, participants, transactions, netByCurrency, suggestedPayments and
+spending totals. This is the one read of a whole group; every write returns
+only the record it changed.
 
 Participants and categories have no list endpoints; they are read from this
 payload. For one member's balance worked out transaction by transaction, see
@@ -108,7 +109,8 @@ var groupCreateCmd = &cobra.Command{
 participant; each participant may carry a color. Optional: currency, a client
 token, categories (token, emoji, name, position) to replace the defaults, and
 creatorParticipantToken naming the participant that is you (you become its
-admin). See "wariwari group example create".
+admin). See "wariwari group example create". Returns the group without its
+participants; read them with "wariwari group show".
 
 A developer API key may create 20 groups an hour. Pass --idempotency-key (a
 UUID) to make a retry safe for 90 days; reusing a key with a different body
@@ -160,10 +162,10 @@ var groupExampleUpdateCmd = &cobra.Command{
 	Short: "Example payload for updating a group",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"name":        "Trip 2026",
-			"icon":        "🧳",
-			"currency":    "USD",
-			"lockVersion": 1,
+			"name":       "Trip 2026",
+			"icon":       "🧳",
+			"currency":   "USD",
+			"visibility": "public_view_only",
 		}, "Group update example")
 	},
 }
@@ -171,9 +173,9 @@ var groupExampleUpdateCmd = &cobra.Command{
 var groupUpdateCmd = &cobra.Command{
 	Use:   "update [TOKEN]",
 	Short: "Update a group from JSON",
-	Long: `Update group metadata. lockVersion is required — send the value from the
-current snapshot. A stale value returns 409 CONFLICT with the fresh group under
-"current". Changing currency rebases existing transactions in the background.`,
+	Long: `Update a group: send only what changes of name, icon, currency and
+visibility (public_editable, public_view_only, private_registered). Changing
+currency rebases existing transactions in the background. Returns the group.` + guardedUpdateHelp,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 0)
@@ -184,7 +186,11 @@ current snapshot. A stale value returns 409 CONFLICT with the fresh group under
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group, write(body))
+		w, err := revisedWrite(cmd, body, groupRecord(group))
+		if err != nil {
+			return err
+		}
+		data, err := api.Patch(cmd.Context(), "/groups/"+group, w)
 		if err != nil {
 			return err
 		}
@@ -276,12 +282,12 @@ categoryBreakdown, perPersonCents, a timeline, and memberTotals.
 			return err
 		}
 		data, err := api.Get(cmd.Context(), "/groups/"+group+"/stats", map[string]string{
-			"dateRange":   groupStatsDateRange,
-			"participant": groupStatsParticipant,
-			"category":    groupStatsCategory,
-			"date":        groupStatsDate,
-			"month":       groupStatsMonth,
-			"week":        groupStatsWeek,
+			"dateRange":        groupStatsDateRange,
+			"participantToken": groupStatsParticipant,
+			"categoryToken":    groupStatsCategory,
+			"date":             groupStatsDate,
+			"month":            groupStatsMonth,
+			"week":             groupStatsWeek,
 		})
 		if err != nil {
 			return err
@@ -338,65 +344,13 @@ Needs settings access to the group.`,
 	},
 }
 
-var groupSettingsCmd = &cobra.Command{
-	Use:   "settings [TOKEN]",
-	Short: "Show group settings",
-	Long: `Show the editable settings: currency, visibility, categories (with a used
-flag), and participants with their membershipRole. Needs settings access.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		group, err := groupArg(args, 0)
-		if err != nil {
-			return err
-		}
-		data, err := api.Get(cmd.Context(), "/groups/"+group+"/settings", nil)
-		if err != nil {
-			return err
-		}
-		return printOK(data, "Group settings",
-			crumb("update", "wariwari group settings update "+group+" --data '{\"lockVersion\":N}'", "Change currency, visibility, categories or roles"))
-	},
-}
-
-var groupSettingsUpdateCmd = &cobra.Command{
-	Use:   "update [TOKEN]",
-	Short: "Update group settings from JSON",
-	Long: `Update currency, visibility, category edits, and participant roles.
-lockVersion (the group's) is required.
-
-  currency       ISO-4217; existing transactions are rebased in the background
-  visibility     public_editable, public_view_only, private_registered
-  categories     [{"token", "name", "emoji", "position"}], existing categories by token
-  participants   [{"token", "membershipRole"}], role is read_only, editor or
-                 admin; only participants linked to an account have a role
-
-Returns the refreshed group snapshot.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		group, err := groupArg(args, 0)
-		if err != nil {
-			return err
-		}
-		body, err := commandData()
-		if err != nil {
-			return err
-		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/settings", write(body))
-		if err != nil {
-			return err
-		}
-		return printOK(data, "Group settings updated")
-	},
-}
-
 func init() {
 	rootCmd.AddCommand(groupCmd)
-	addLockVersionFlag(groupDeleteCmd)
-	addDataFlags(groupCreateCmd, groupUpdateCmd, groupSettingsUpdateCmd)
-	addIdempotencyFlag(groupCreateCmd, groupUpdateCmd, groupDeleteCmd, groupArchiveCmd, groupUnarchiveCmd, groupSettingsUpdateCmd)
+	addLockVersionFlag(groupUpdateCmd, groupDeleteCmd)
+	addDataFlags(groupCreateCmd, groupUpdateCmd)
+	addIdempotencyFlag(groupCreateCmd, groupUpdateCmd, groupDeleteCmd, groupArchiveCmd, groupUnarchiveCmd)
 	groupCmd.AddCommand(groupListCmd, groupShowCmd, groupActivityCmd, groupCreateCmd, groupUpdateCmd, groupDeleteCmd,
-		groupArchiveCmd, groupUnarchiveCmd, groupStatsCmd, groupFxRateCmd, groupExportCmd, groupSettingsCmd, groupExampleCmd)
-	groupSettingsCmd.AddCommand(groupSettingsUpdateCmd)
+		groupArchiveCmd, groupUnarchiveCmd, groupStatsCmd, groupFxRateCmd, groupExportCmd, groupExampleCmd)
 	groupExampleCmd.AddCommand(groupExampleCreateCmd, groupExampleUpdateCmd)
 	groupListCmd.Flags().StringVar(&groupCursor, "cursor", "", "Pagination cursor from pagination.cursor")
 	groupListCmd.Flags().IntVar(&groupTake, "take", 0, "Results per page (max 100)")

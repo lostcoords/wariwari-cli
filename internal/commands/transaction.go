@@ -25,7 +25,7 @@ Filters combine and narrow rather than assert: a well-formed token that matches
 nothing returns an empty page, while a malformed date is 400 INVALID_REQUEST.
 
   --from/--to      ISO dates (2026-01-31), inclusive
-  --category       group category token (from the snapshot's groupCategories)
+  --category       group category token (from the snapshot's categories)
   --participant    participant token; matches transactions that participant
                    paid for or owes a share of`,
 	Args: cobra.MaximumNArgs(1),
@@ -37,8 +37,8 @@ nothing returns an empty page, while a malformed date is 400 INVALID_REQUEST.
 		query := pagingQuery(transactionTake, transactionCursor)
 		query["from"] = transactionFrom
 		query["to"] = transactionTo
-		query["category"] = transactionCategory
-		query["participant"] = transactionParticipant
+		query["categoryToken"] = transactionCategory
+		query["participantToken"] = transactionParticipant
 
 		data, err := api.Get(cmd.Context(), "/groups/"+group+"/transactions", query)
 		if err != nil {
@@ -70,22 +70,25 @@ var transactionShowCmd = &cobra.Command{
 			return err
 		}
 		return printOK(data, "Transaction",
-			crumb("update", "wariwari transaction update "+args[0]+" "+group, "Edit it — send this record's lockVersion"))
+			crumb("update", "wariwari transaction update "+args[0]+" "+group, "Edit it; pass this record's lockVersion as --lock-version"))
 	},
 }
 
 var transactionCreateCmd = &cobra.Command{
 	Use:   "create [GROUP_TOKEN]",
 	Short: "Create a transaction from JSON",
-	Long: `Create an expense or settlement payment. Developer API keys are
-supported. Returns the refreshed group snapshot.
+	Long: `Create an expense and get it back. Developer API keys are supported.
 
-Required: description, amountCents, currency, splitType, date, paidByToken,
-splits. splitType is one of equal, percentage, shares, amount; with equal the
-splits may omit amountCents and the server divides evenly. Optional:
-groupCategoryToken, timeOfDay (HH:MM), and balanceCurrency (send the
-transaction currency to keep it in its own balance bucket instead of the
-group currency). Record a settlement with "wariwari payment create".
+Required: kind ("expense"), description, amountCents, currency, splitType,
+date, paidByParticipantToken, splits. splitType is one of equal, percentage,
+shares, amount; with equal the splits may omit amountCents and the server
+divides evenly. Optional: categoryToken (a group category from the snapshot's
+categories; there is no free-text category), timeOfDay (HH:MM), and
+balanceCurrency (send the transaction currency to keep it in its own balance
+bucket instead of the group currency).
+
+A settlement is a transaction of kind "payment" with its own fields; record
+one with "wariwari payment create".
 
 Reusing a client-generated token returns 409 DUPLICATE_TOKEN; retry a create
 safely with --idempotency-key and the same body.`,
@@ -117,17 +120,17 @@ var transactionExampleCreateCmd = &cobra.Command{
 	Short: "Example payload for creating a transaction",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"token":              "9AHTHuAGT7U2CpSfktrfUAYA",
-			"kind":               "expense",
-			"description":        "Team dinner",
-			"groupCategoryToken": "4QfYk8nE2pRtVwXz7aBcDeFg",
-			"amountCents":        12000,
-			"currency":           "JPY",
-			"balanceCurrency":    "JPY",
-			"splitType":          "equal",
-			"date":               "2026-05-23",
-			"timeOfDay":          "19:30",
-			"paidByToken":        "7gKMjL9pPWsKaHQ4AbwS5kVj",
+			"token":                  "9AHTHuAGT7U2CpSfktrfUAYA",
+			"kind":                   "expense",
+			"description":            "Team dinner",
+			"categoryToken":          "4QfYk8nE2pRtVwXz7aBcDeFg",
+			"amountCents":            12000,
+			"currency":               "JPY",
+			"balanceCurrency":        "JPY",
+			"splitType":              "equal",
+			"date":                   "2026-05-23",
+			"timeOfDay":              "19:30",
+			"paidByParticipantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
 			"splits": []map[string]any{
 				{"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj"},
 				{"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa"},
@@ -142,17 +145,17 @@ var transactionExampleUpdateCmd = &cobra.Command{
 	Short: "Example payload for updating a transaction",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"description":        "Team dinner at ramen shop",
-			"groupCategoryToken": nil,
-			"amountCents":        13200,
-			"splitType":          "amount",
-			"timeOfDay":          "20:00",
-			"paidByToken":        "7gKMjL9pPWsKaHQ4AbwS5kVj",
+			"kind":                   "expense",
+			"description":            "Team dinner at ramen shop",
+			"categoryToken":          nil,
+			"amountCents":            13200,
+			"splitType":              "amount",
+			"timeOfDay":              "20:00",
+			"paidByParticipantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
 			"splits": []map[string]any{
 				{"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj", "amountCents": 6600},
 				{"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa", "amountCents": 6600},
 			},
-			"lockVersion": 3,
 		}, "Transaction update example")
 	},
 }
@@ -160,10 +163,10 @@ var transactionExampleUpdateCmd = &cobra.Command{
 var transactionUpdateCmd = &cobra.Command{
 	Use:   "update TRANSACTION_TOKEN [GROUP_TOKEN]",
 	Short: "Update a transaction from JSON",
-	Long: `Update a transaction. lockVersion is required — send the value from the
-current record. A stale value returns 409 CONFLICT with the fresh transaction
-under "current". Sending splits replaces all existing splits; send
-"groupCategoryToken": null to clear the category.`,
+	Long: `Update an expense and get it back. kind is required and cannot change:
+send "kind": "expense" plus only the fields that change. Sending splits
+replaces all existing splits; send "categoryToken": null to clear the
+category. Update a settlement with "wariwari payment update".` + guardedUpdateHelp,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 1)
@@ -174,7 +177,11 @@ under "current". Sending splits replaces all existing splits; send
 		if err != nil {
 			return err
 		}
-		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], write(body))
+		w, err := revisedWrite(cmd, body, transactionRecord(group, args[0]))
+		if err != nil {
+			return err
+		}
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], w)
 		if err != nil {
 			return err
 		}
@@ -196,11 +203,10 @@ var transactionDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], w)
-		if err != nil {
+		if _, err := api.Delete(cmd.Context(), "/groups/"+group+"/transactions/"+args[0], w); err != nil {
 			return err
 		}
-		return printOK(data, "Transaction deleted")
+		return printOK(map[string]any{"token": args[0], "deleted": true}, "Transaction deleted")
 	},
 }
 
@@ -224,7 +230,7 @@ var transactionActivityCmd = &cobra.Command{
 }
 
 func init() {
-	addLockVersionFlag(transactionDeleteCmd)
+	addLockVersionFlag(transactionUpdateCmd, transactionDeleteCmd)
 	addDataFlags(transactionCreateCmd, transactionUpdateCmd, transactionBulkEditCmd, transactionBulkDeleteCmd)
 	addIdempotencyFlag(transactionCreateCmd, transactionUpdateCmd, transactionDeleteCmd, transactionBulkEditCmd, transactionBulkDeleteCmd)
 	rootCmd.AddCommand(transactionCmd)

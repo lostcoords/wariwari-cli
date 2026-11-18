@@ -63,8 +63,8 @@ var recurringCreateCmd = &cobra.Command{
 	Short:   "Schedule a recurring expense",
 	Long: `Schedule an expense that wariwari posts on every occurrence. The JSON body
 takes the expense fields of "transaction create" (description, amountCents,
-currency, paidByToken, splitType, splits, and optionally category or
-groupCategoryToken), without date, timeOfDay or kind. The schedule comes from
+currency, paidByParticipantToken, splitType, splits, and optionally
+categoryToken), without date, timeOfDay or kind. The schedule comes from
 flags, which override the same fields in the body:
 
   --every weekly|monthly|yearly   cadence (required unless the body has it)
@@ -98,6 +98,7 @@ var recurringUpdateCmd = &cobra.Command{
 	Short: "Change a recurring expense",
 	Long: `Change a schedule: send only the fields that change, as JSON, flags, or both.
 Sending splits replaces them all. Expenses it already posted stay as they are.
+A schedule has no lockVersion: the last write wins.
 Needs Pro on your account; otherwise 403 PRO_REQUIRED.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -145,11 +146,11 @@ var recurringExampleCreateCmd = &cobra.Command{
 	Short: "Example payload for scheduling a recurring expense",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"description": "Rent",
-			"amountCents": 180000,
-			"currency":    "JPY",
-			"paidByToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
-			"splitType":   "equal",
+			"description":            "Rent",
+			"amountCents":            180000,
+			"currency":               "JPY",
+			"paidByParticipantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj",
+			"splitType":              "equal",
 			"splits": []map[string]any{
 				{"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj"},
 				{"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa"},

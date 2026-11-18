@@ -33,7 +33,7 @@ stored photo with a short-lived url. Needs Pro on your account; otherwise
 		if err != nil {
 			return err
 		}
-		data, err := api.Upload(cmd.Context(), http.MethodPut, receiptPath(group, args[0]), file)
+		data, err := api.Upload(cmd.Context(), http.MethodPut, receiptPath(group, args[0]), file, write(nil))
 		if err != nil {
 			return err
 		}
@@ -46,7 +46,8 @@ var transactionReceiptShowCmd = &cobra.Command{
 	Aliases: []string{"view"},
 	Short:   "Show an expense's receipt photo",
 	Long: `Show the receipt photo with a short-lived url, or "receiptPhoto": null when
-the expense has none. Any member can read it, with or without Pro.`,
+the expense has none; every transaction's hasReceiptPhoto says which. Any
+member can read it, with or without Pro.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 1)
@@ -74,7 +75,7 @@ var transactionReceiptDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if _, err := api.Delete(cmd.Context(), receiptPath(group, args[0]), client.Write{}); err != nil {
+		if _, err := api.Delete(cmd.Context(), receiptPath(group, args[0]), write(nil)); err != nil {
 			return err
 		}
 		return printOK(map[string]any{"transactionToken": args[0], "receiptPhoto": nil}, "Receipt photo removed")
@@ -107,4 +108,5 @@ func uploadFile(field, path string) (client.File, error) {
 func init() {
 	transactionCmd.AddCommand(transactionReceiptCmd)
 	transactionReceiptCmd.AddCommand(transactionReceiptShowCmd, transactionReceiptUploadCmd, transactionReceiptDeleteCmd)
+	addIdempotencyFlag(transactionReceiptUploadCmd, transactionReceiptDeleteCmd)
 }

@@ -3,7 +3,6 @@ package commands
 import (
 	"net/http"
 
-	"github.com/lostcoords/wariwari-cli/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -20,8 +19,8 @@ var fileListCmd = &cobra.Command{
 	Use:     "list [GROUP_TOKEN]",
 	Aliases: []string{"ls"},
 	Short:   "List a group's photos and files",
-	Long: `List a group's photos and files, newest first, with the group's storage use
-(storage.usedBytes against storage.limitBytes). Any member can list and
+	Long: `List a group's photos and files, newest first, with your own storage use
+across every group (storage.usedBytes against storage.limitBytes). Any member can list and
 download them, with or without Pro. The urls are short-lived.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -73,7 +72,7 @@ STORAGE_LIMIT. Needs Pro on your account; otherwise 403 PRO_REQUIRED.`,
 		if err != nil {
 			return err
 		}
-		data, err := api.Upload(cmd.Context(), http.MethodPost, "/groups/"+group+"/attachments", file)
+		data, err := api.Upload(cmd.Context(), http.MethodPost, "/groups/"+group+"/attachments", file, write(nil))
 		if err != nil {
 			return err
 		}
@@ -92,7 +91,7 @@ var fileDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if _, err := api.Delete(cmd.Context(), "/groups/"+group+"/attachments/"+args[0], client.Write{}); err != nil {
+		if _, err := api.Delete(cmd.Context(), "/groups/"+group+"/attachments/"+args[0], write(nil)); err != nil {
 			return err
 		}
 		return printOK(map[string]any{"id": args[0], "deleted": true}, "File deleted")
@@ -102,6 +101,7 @@ var fileDeleteCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(fileCmd)
 	fileCmd.AddCommand(fileListCmd, fileShowCmd, fileUploadCmd, fileDeleteCmd)
+	addIdempotencyFlag(fileUploadCmd, fileDeleteCmd)
 	fileListCmd.Flags().StringVar(&fileCursor, "cursor", "", "Pagination cursor from pagination.cursor")
 	fileListCmd.Flags().IntVar(&fileTake, "take", 0, "Results per page (max 100)")
 }

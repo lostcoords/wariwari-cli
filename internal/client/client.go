@@ -22,9 +22,10 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// Error carries an RFC 9457 Problem Details response. The API always answers
-// failures with `code`, `title`, `detail` and `status`, plus `errors` on
-// validation failures and `current` (the fresh record) on a 409 CONFLICT.
+// Error carries the API's Problem body. Every failure answers with `code`,
+// `title`, `detail`, `status` and `instance`, plus `errors` on validation
+// failures and, on a 409 CONFLICT, `current`: the fresh record under the key
+// that names its kind (`transaction`, `group`, ...).
 type Error struct {
 	StatusCode int
 	Body       map[string]any
@@ -97,8 +98,8 @@ type Write struct {
 	// replays the stored outcome instead of writing twice.
 	IdempotencyKey string
 	// ExpectedRevision is the target record's lockVersion as last observed,
-	// sent as WariWari-Expected-Revision on writes without a body to carry it
-	// (deletes, merges, reorders). Nil sends no header.
+	// sent as Expected-Revision on every update, delete and merge of a record
+	// that has one. Nil sends no header.
 	ExpectedRevision *int
 }
 
@@ -108,7 +109,7 @@ func (w Write) header() http.Header {
 		header.Set("Idempotency-Key", w.IdempotencyKey)
 	}
 	if w.ExpectedRevision != nil {
-		header.Set("WariWari-Expected-Revision", strconv.Itoa(*w.ExpectedRevision))
+		header.Set("Expected-Revision", strconv.Itoa(*w.ExpectedRevision))
 	}
 	return header
 }
@@ -119,6 +120,10 @@ func (c *Client) Post(ctx context.Context, path string, w Write) (any, error) {
 
 func (c *Client) Patch(ctx context.Context, path string, w Write) (any, error) {
 	return c.Do(ctx, http.MethodPatch, path, nil, w.Body, w.header())
+}
+
+func (c *Client) Put(ctx context.Context, path string, w Write) (any, error) {
+	return c.Do(ctx, http.MethodPut, path, nil, w.Body, w.header())
 }
 
 func (c *Client) Delete(ctx context.Context, path string, w Write) (any, error) {
@@ -133,24 +138,27 @@ type File struct {
 	Content     []byte
 }
 
-// Upload sends one file as multipart/form-data.
-func (c *Client) Upload(ctx context.Context, method, path string, file File) (any, error) {
+// Upload sends one file as multipart/form-data. w carries the write's headers;
+// its Body is not sent.
+func (c *Client) Upload(ctx context.Context, method, path string, file File, w Write) (any, error) {
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	part := textproto.MIMEHeader{}
 	part.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, file.Field, file.Name))
 	part.Set("Content-Type", file.ContentType)
-	w, err := form.CreatePart(part)
+	dst, err := form.CreatePart(part)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := w.Write(file.Content); err != nil {
+	if _, err := dst.Write(file.Content); err != nil {
 		return nil, err
 	}
 	if err := form.Close(); err != nil {
 		return nil, err
 	}
-	return c.decode(c.send(ctx, method, path, nil, &body, http.Header{"Content-Type": {form.FormDataContentType()}}))
+	header := w.header()
+	header.Set("Content-Type", form.FormDataContentType())
+	return c.decode(c.send(ctx, method, path, nil, &body, header))
 }
 
 // GetRaw fetches a non-JSON body, such as the CSV export.

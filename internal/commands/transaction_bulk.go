@@ -7,30 +7,35 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const bulkRevisionHelp = `Each item of transactions is {"token", "expectedRevision"}: the lockVersion
+you read. Any stale one returns 409 CONFLICT and changes nothing. An item
+without expectedRevision is read first and sent at its current lockVersion.
+
+Bulk editing is behind a feature flag; while it is off the API answers 404
+NOT_FOUND.`
+
 var transactionBulkEditCmd = &cobra.Command{
 	Use:   "bulk-edit [GROUP_TOKEN]",
 	Short: "Re-assign payer, category, split or date across many transactions",
-	Long: `Apply one change to many transactions. The body names transactionTokens and
-any of paidByToken, groupCategoryToken, splitType with splitParticipantTokens
-(plus splitPercentages or splitShares), date, timeOfDay.
+	Long: `Apply one change to many transactions, all of them or none. The body names
+transactions and any of paidByParticipantToken, categoryToken, date, timeOfDay
+and split: {"type": equal|percentage|shares, "members": [{"participantToken",
+"weight"}], "newMemberNames": [...]}. Category and split apply to expenses
+only. Returns the changed transactions and any participants the split added.
+See "wariwari transaction example bulk-edit".
 
-lockVersions maps each token to the lockVersion you read; a stale one returns
-409 CONFLICT. Tokens missing from lockVersions are read first and sent at
-their current lockVersion. See "wariwari transaction example bulk-edit".
-
-Bulk editing is behind a feature flag; while it is off for your account the
-API answers 404 NOT_FOUND.`,
+` + bulkRevisionHelp,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
-		body, err := bulkBody(cmd.Context(), group)
+		body, _, err := bulkBody(cmd.Context(), group)
 		if err != nil {
 			return err
 		}
-		data, err := api.Post(cmd.Context(), "/groups/"+group+"/transaction_bulk_edit", write(body))
+		data, err := api.Patch(cmd.Context(), "/groups/"+group+"/transaction_batch", write(body))
 		if err != nil {
 			return err
 		}
@@ -41,25 +46,24 @@ API answers 404 NOT_FOUND.`,
 var transactionBulkDeleteCmd = &cobra.Command{
 	Use:   "bulk-delete [GROUP_TOKEN]",
 	Short: "Soft-delete many transactions",
-	Long: `Soft-delete many transactions from {"transactionTokens": [...]}.
+	Long: `Soft-delete many transactions, all of them or none, from
+{"transactions": [{"token": "..."}]}.
 
-lockVersions maps each token to the lockVersion you read; tokens missing from
-it are read first and sent at their current lockVersion.`,
+` + bulkRevisionHelp,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group, err := groupArg(args, 0)
 		if err != nil {
 			return err
 		}
-		body, err := bulkBody(cmd.Context(), group)
+		body, tokens, err := bulkBody(cmd.Context(), group)
 		if err != nil {
 			return err
 		}
-		data, err := api.Delete(cmd.Context(), "/groups/"+group+"/transaction_bulk_edit", write(body))
-		if err != nil {
+		if _, err := api.Post(cmd.Context(), "/groups/"+group+"/transaction_deletions", write(body)); err != nil {
 			return err
 		}
-		return printOK(data, "Transactions deleted")
+		return printOK(map[string]any{"tokens": tokens, "deleted": true}, fmt.Sprintf("%d transactions deleted", len(tokens)))
 	},
 }
 
@@ -68,48 +72,52 @@ var transactionExampleBulkEditCmd = &cobra.Command{
 	Short: "Example payload for bulk-editing transactions",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return printOK(map[string]any{
-			"transactionTokens":  []string{"9AHTHuAGT7U2CpSfktrfUAYA", "3bRtYuKmNpQwErTyUiOpAsDf"},
-			"lockVersions":       map[string]int{"9AHTHuAGT7U2CpSfktrfUAYA": 2, "3bRtYuKmNpQwErTyUiOpAsDf": 0},
-			"groupCategoryToken": "4QfYk8nE2pRtVwXz7aBcDeFg",
-			"splitType":          "shares",
-			"splitParticipantTokens": []string{
-				"7gKMjL9pPWsKaHQ4AbwS5kVj", "8mPNkR4qQXtLbJR5CcxT6yWa",
+			"transactions": []map[string]any{
+				{"token": "9AHTHuAGT7U2CpSfktrfUAYA", "expectedRevision": 2},
+				{"token": "3bRtYuKmNpQwErTyUiOpAsDf", "expectedRevision": 0},
 			},
-			"splitShares": map[string]int{"7gKMjL9pPWsKaHQ4AbwS5kVj": 2, "8mPNkR4qQXtLbJR5CcxT6yWa": 1},
+			"categoryToken": "4QfYk8nE2pRtVwXz7aBcDeFg",
+			"split": map[string]any{
+				"type": "shares",
+				"members": []map[string]any{
+					{"participantToken": "7gKMjL9pPWsKaHQ4AbwS5kVj", "weight": 2},
+					{"participantToken": "8mPNkR4qQXtLbJR5CcxT6yWa", "weight": 1},
+				},
+			},
 		}, "Transaction bulk-edit example")
 	},
 }
 
-// bulkBody reads the JSON body and fills lockVersions for any listed token
-// the caller left out, from that transaction's current record.
-func bulkBody(ctx context.Context, group string) (map[string]any, error) {
+// bulkBody reads the JSON body and gives every listed transaction the caller
+// left without an expectedRevision its current lockVersion. It also returns
+// the tokens, in order.
+func bulkBody(ctx context.Context, group string) (map[string]any, []string, error) {
 	body, err := commandData()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	tokens, _ := body["transactionTokens"].([]any)
-	if len(tokens) == 0 {
-		return nil, fmt.Errorf(`transactionTokens is required, e.g. --data '{"transactionTokens":["TOKEN"]}'`)
+	items, _ := body["transactions"].([]any)
+	if len(items) == 0 {
+		return nil, nil, fmt.Errorf(`transactions is required, e.g. --data '{"transactions":[{"token":"TOKEN"}]}'`)
 	}
-	versions, _ := body["lockVersions"].(map[string]any)
-	if versions == nil {
-		versions = map[string]any{}
-	}
-	for _, raw := range tokens {
-		token, _ := raw.(string)
-		if _, ok := versions[token]; ok || token == "" {
+	tokens := make([]string, 0, len(items))
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		token, _ := item["token"].(string)
+		if token == "" {
+			return nil, nil, fmt.Errorf(`each of transactions is {"token": "...", "expectedRevision": N}`)
+		}
+		tokens = append(tokens, token)
+		if _, ok := item["expectedRevision"]; ok {
 			continue
 		}
 		record, err := transactionRecord(group, token)(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", token, err)
+			return nil, nil, fmt.Errorf("read %s: %w", token, err)
 		}
-		revision, err := lockVersion(record)
-		if err != nil {
-			return nil, err
+		if item["expectedRevision"], err = lockVersion(record); err != nil {
+			return nil, nil, err
 		}
-		versions[token] = revision
 	}
-	body["lockVersions"] = versions
-	return body, nil
+	return body, tokens, nil
 }
